@@ -1,9 +1,5 @@
-# library(devtools)
-# install_github("erikcs/grf@RATE", subdir = "r-package/grf")
 library(readr)
 library(dplyr)
-
-source("rate_convenience.R")
 
 data_loc = "data/criteo-uplift-v2.1.csv"
 seed = 20211013
@@ -21,8 +17,8 @@ test_subsamp = subsamp[[2]]
 subsamp = subsamp[[1]]
 train_features = model.matrix(~.-conversion-treatment-exposure-visit-traintest, data=subsamp)
 
-# save(test_subsamp, file="test_subsamp.Rdata")
-load("test_subsamp.Rdata")
+save(test_subsamp, file="test_subsamp.Rdata")
+# load("test_subsamp.Rdata")
 
 
 print("Average visit:")
@@ -38,14 +34,14 @@ print(aggregate(test_subsamp[,c("visit", "conversion")], list(test_subsamp$treat
 
 test_features = model.matrix(~.-conversion-treatment-exposure-visit-traintest, data=test_subsamp)
 
-# model = grf::regression_forest(X=train_features[subsamp$treatment==0, ], Y=subsamp$conversion[subsamp$treatment==0], mtry=mtry, honesty=honestly, min.node.size=min_node_size)
-# save(model, file="baseline_model.Rdata")
-load("baseline_model.Rdata")
+model = grf::regression_forest(X=train_features[subsamp$treatment==0, ], Y=subsamp$conversion[subsamp$treatment==0], mtry=mtry, honesty=honestly, min.node.size=min_node_size)
+save(model, file="baseline_model.Rdata")
+# load("baseline_model.Rdata")
 preds = predict(model, newdata=test_features)$predictions
 
-# cate_model = grf::causal_forest(X=train_features, Y=subsamp$conversion, W=subsamp$treatment, W.hat=rep(mean(subsamp$treatment), ns*2), mtry=mtry, honesty=honestly, min.node.size=min_node_size)
-# save(cate_model, file="cate_model.Rdata")
-load("cate_model.Rdata")
+cate_model = grf::causal_forest(X=train_features, Y=subsamp$conversion, W=subsamp$treatment, W.hat=rep(mean(subsamp$treatment), ns*2), mtry=mtry, honesty=honestly, min.node.size=min_node_size)
+save(cate_model, file="cate_model.Rdata")
+# load("cate_model.Rdata")
 preds_cate = predict(cate_model, newdata=test_features)$predictions
 
 y_eval = test_subsamp$visit
@@ -63,13 +59,6 @@ qini_conversion = grf::rank_average_treatment_effect(eval_model_conversion, cbin
 
 save(autoc_visit, autoc_conversion, qini_conversion, qini_visit, file="rates_and_tocs.Rdata")
 # load("rates_and_tocs.Rdata")
-
-pdf(file="toc_curve_visit.pdf")
-plot(autoc_visit, main=NULL, sub=NULL)
-dev.off()
-pdf(file="toc_curve_conversion.pdf")
-plot(autoc_conversion, main=NULL, sub=NULL)
-dev.off()
 
 print("ATE (visit)")
 ate = grf::average_treatment_effect(eval_model_visit)
