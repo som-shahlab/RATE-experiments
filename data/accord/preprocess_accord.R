@@ -4,34 +4,35 @@ library(matrixStats)  # Needed for "rowMaxs"
 library(survival)  # NEeded for "Surv"
 # library(Hmisc)
 
-# TODO: Set this according to your local environment. You should
-# place in this folder the unzipped ACCORD_2017b_2 folder.
-path_to_accord_data <- "~/Documents/GitHub/risk-vs-hte/data/accord/"
-setwd(
-  paste0(
-    path_to_accord_data, 
-    "ACCORD_2017b_2/Main_Study/3-Data_Sets-Analysis/3a-Analysis_Data_Sets/"
-  )
-)
+# TODO: If not calling from the command line, set this according to your 
+# local environment. You should place in this folder the 
+# unzipped ACCORD_2017b_2 folder.
+setwd("~/Documents/GitHub/RATE-experiments/data/accord/")
+
 
 ##########################
-# SANJAY'S ORIGINAL CODE ##
+# SANJAY'S ORIGINAL CODE #
 ##########################
 
-# Copied from https://github.com/sanjaybasu/sprint-challenge/blob/master/accordorg.R
+# Adapted from https://github.com/sanjaybasu/sprint-challenge/blob/master/accordorg.R
+# Copyright (c) 2020 Sanjay Basu, under MIT License
 
-accord_key = read.sas7bdat("accord_key.sas7bdat")
+# NOTE: This script assumes that the ACCORD_2017b_2 data files downloaded from
+# BioLINCC are stored in the same folder as the script itself (e.g., data/accord/)
+tmp.prefix <- "ACCORD_2017b_2/Main_Study/3-Data_Sets-Analysis/3a-Analysis_Data_Sets/"
+accord_key = read.sas7bdat(paste0(tmp.prefix, "accord_key.sas7bdat"))
 accord_key = accord_key[(accord_key$arm>=1)&(accord_key$arm<=4),]
-bloodpressure = read.sas7bdat("bloodpressure.sas7bdat")
-concomitantmeds = read.sas7bdat("concomitantmeds.sas7bdat")
-cvdoutcomes = read.sas7bdat("cvdoutcomes.sas7bdat")
-lipids = read.sas7bdat("lipids.sas7bdat")
-otherlabs = read.sas7bdat("otherlabs.sas7bdat")
+bloodpressure = read.sas7bdat(paste0(tmp.prefix, "bloodpressure.sas7bdat"))
+concomitantmeds = read.sas7bdat(paste0(tmp.prefix, "concomitantmeds.sas7bdat"))
+cvdoutcomes = read.sas7bdat(paste0(tmp.prefix, "cvdoutcomes.sas7bdat"))
+lipids = read.sas7bdat(paste0(tmp.prefix, "lipids.sas7bdat"))
+otherlabs = read.sas7bdat(paste0(tmp.prefix, "otherlabs.sas7bdat"))
 
-setwd(paste0(path_to_accord_data, "ACCORD_2017b_2/Main_Study/4-Data_Sets-CRFs/4a-CRF_Data_Sets"))
-f13_intensivebpmanagement = read.sas7bdat("f13_intensivebpmanagement.sas7bdat")
-f14_standardbpmanagement = read.sas7bdat("f14_standardbpmanagement.sas7bdat")
-f07_baselinehistoryphysicalexam = read.sas7bdat("f07_baselinehistoryphysicalexam.sas7bdat")
+tmp.prefix <-  "ACCORD_2017b_2/Main_Study/4-Data_Sets-CRFs/4a-CRF_Data_Sets/"
+# setwd(paste0(path_to_accord_data, "ACCORD_2017b_2/Main_Study/4-Data_Sets-CRFs/4a-CRF_Data_Sets"))
+f13_intensivebpmanagement = read.sas7bdat(paste0(tmp.prefix, "f13_intensivebpmanagement.sas7bdat"))
+f14_standardbpmanagement = read.sas7bdat(paste0(tmp.prefix, "f14_standardbpmanagement.sas7bdat"))
+f07_baselinehistoryphysicalexam = read.sas7bdat(paste0(tmp.prefix, "f07_baselinehistoryphysicalexam.sas7bdat"))
 accord_key_cut = accord_key[which((accord_key$arm==1)|(accord_key$arm==2)|(accord_key$arm==3)|(accord_key$arm==4)),]
 accord_key_cut$INTENSIVE = (accord_key_cut$arm==1)|(accord_key_cut$arm==3)
 bloodpressure_cut = bloodpressure[which(bloodpressure$Visit=="BLR"),]
@@ -251,11 +252,33 @@ accord_set = merge(accord_set,otherlabs_cut,by="MaskID")
 # TONY'S VERSION OF SANJAY'S CODE #
 ###################################
 
-# Copied from https://github.com/tonyduan/hte-prediction-rcts/blob/master/data/accord/preprocess_accord.R
+# Adapted from https://github.com/tonyduan/hte-prediction-rcts/blob/master/data/accord/preprocess_accord.R
+# Copyright (c) 2019 Tony Duan, under MIT License
 
-cvd = (accord_set$censor_nmi==0)|(accord_set$censor_nst==0)|(accord_set$censor_cm==0)|(accord_set$censor_chf==0)|(accord_set$censor_maj==0)
-t_censor = rowMaxs(cbind(accord_set$fuyrs_nmi*365.25,accord_set$fuyrs_nst*365.25,accord_set$fuyrs_cm*365.25,accord_set$fuyrs_chf*365.25,accord_set$fuyrs_maj*365.25))
-t_cvds = rowMaxs(cbind(accord_set$fuyrs_nmi*365.25*(1-accord_set$censor_nmi),accord_set$fuyrs_nst*365.25*(1-accord_set$censor_nst),accord_set$fuyrs_cm*365.25*(1-accord_set$censor_cm),accord_set$fuyrs_chf*365.25*(1-accord_set$censor_chf),accord_set$fuyrs_maj*365.25*(1-accord_set$censor_maj)))
+cvd = (accord_set$censor_nmi == 0) |  # censor_nmi: Nonfatal MI censoring flag (0=event, 1=censored)
+  (accord_set$censor_nst==0) | 
+  (accord_set$censor_cm==0) | 
+  (accord_set$censor_chf==0) | 
+  (accord_set$censor_maj==0)
+
+t_censor = rowMaxs(
+  cbind(  # See ACCORD Data Dictionary pg. 6 on cvdoutcomes.sas7bdat for def'n
+    accord_set$fuyrs_nmi * 365.25,  # fuyrs_nmi: Nonfatal MI Follow-up time (years)
+    accord_set$fuyrs_nst * 365.25,  # fuyrs_nst: Nonfatal stroke Follow-up time (years)
+    accord_set$fuyrs_cm * 365.25,   # fuyrs_cm: CVD mortality Follow-up time (years)
+    accord_set$fuyrs_chf * 365.25,  # fuyrs_chf: CHF Follow-up time (years)
+    accord_set$fuyrs_maj * 365.25   # fuyrs_maj: Major CHD Follow-up time (years)
+  )
+)
+t_cvds = rowMaxs(
+  cbind(
+    accord_set$fuyrs_nmi * 365.25 * (1 - accord_set$censor_nmi),
+    accord_set$fuyrs_nst * 365.25 * (1 - accord_set$censor_nst),
+    accord_set$fuyrs_cm * 365.25 * (1 - accord_set$censor_cm),
+    accord_set$fuyrs_chf * 365.25 * (1 - accord_set$censor_chf),
+    accord_set$fuyrs_maj * 365.25 * (1 - accord_set$censor_maj)
+  )
+)
 t_cvds[t_cvds==0] = t_censor[t_cvds==0]
 t_cvds[t_cvds==0] = 'NA'
 t_cvds = as.numeric(t_cvds)
@@ -275,7 +298,21 @@ RACE_BLACK = as.numeric(accord_set$raceclass=="Black")
 hisp = (accord_set$raceclass=="Hispanic")
 SBP.y = accord_set$sbp
 DBP.y = accord_set$dbp
-N_AGENTS = (accord_set$loop+accord_set$thiazide+accord_set$ksparing+accord_set$a2rb+accord_set$acei+accord_set$dhp_ccb+accord_set$nondhp_ccb+accord_set$alpha_blocker+accord_set$central_agent+accord_set$beta_blocker+accord_set$vasodilator+accord_set$reserpine+accord_set$other_bpmed)
+N_AGENTS = (
+  accord_set$loop + 
+    accord_set$thiazide + 
+    accord_set$ksparing + 
+    accord_set$a2rb + 
+    accord_set$acei + 
+    accord_set$dhp_ccb +
+    accord_set$nondhp_ccb + 
+    accord_set$alpha_blocker + 
+    accord_set$central_agent + 
+    accord_set$beta_blocker + 
+    accord_set$vasodilator + 
+    accord_set$reserpine + 
+    accord_set$other_bpmed
+)
 currentsmoker = (accord_set$cigarett==1)
 formersmoker = (accord_set$smokelif==1)
 ASPIRIN= accord_set$aspirin
@@ -297,48 +334,4 @@ c2<-data.frame(cvd,t_cvds,
                SCREAT,CHR,HDL,TRR,BMI)
 c2=c2[complete.cases(c2),]
 
-setwd(path_to_accord_data)
-write.csv(c2, "./accord_cut.csv", row.names=FALSE)
-
-
-##########################
-# SANJAY'S ORIGINAL CODE #
-##########################
-
-# cvd = (accord_set$censor_nmi==0)|(accord_set$censor_nst==0)|(accord_set$censor_cm==0)|(accord_set$censor_chf==0)|(accord_set$censor_maj==0)
-# t_censor = rowMaxs(cbind(accord_set$fuyrs_nmi*365.25,accord_set$fuyrs_nst*365.25,accord_set$fuyrs_cm*365.25,accord_set$fuyrs_chf*365.25,accord_set$fuyrs_maj*365.25))
-# t_cvds = rowMaxs(cbind(accord_set$fuyrs_nmi*365.25*(1-accord_set$censor_nmi),accord_set$fuyrs_nst*365.25*(1-accord_set$censor_nst),accord_set$fuyrs_cm*365.25*(1-accord_set$censor_cm),accord_set$fuyrs_chf*365.25*(1-accord_set$censor_chf),accord_set$fuyrs_maj*365.25*(1-accord_set$censor_maj)))
-# t_cvds[t_cvds==0] = t_censor[t_cvds==0]
-# t_cvds[t_cvds==0] = 'NA'
-# t_cvds = as.numeric(t_cvds)
-# cOutcome = Surv(time=t_cvds, event = cvd)
-# sae = (accord_set$advexp.max==1)
-# accord_set$visadv.min=as.numeric(accord_set$visadv.min)
-# t_censor = rowMaxs(cbind(accord_set$visnum.max*30.42))
-# t_saes = rowMaxs(cbind(accord_set$visadv.min*30.42))
-# t_saes[is.na(t_saes)] = t_censor[is.na(t_saes)]
-# t_saes[t_saes==0] = 'NA'
-# t_saes = as.numeric(t_saes)
-# dOutcome = Surv(time=t_saes, event = sae)
-# INTENSIVE = as.numeric(accord_set$INTENSIVE)
-# AGE = accord_set$baseline_age
-# FEMALE = accord_set$female
-# RACE_BLACK = as.numeric(accord_set$raceclass=="Black")
-# hisp = (accord_set$raceclass=="Hispanic")
-# SBP.y = accord_set$sbp
-# DBP.y = accord_set$dbp
-# N_AGENTS = (accord_set$loop+accord_set$thiazide+accord_set$ksparing+accord_set$a2rb+accord_set$acei+accord_set$dhp_ccb+accord_set$nondhp_ccb+accord_set$alpha_blocker+accord_set$central_agent+accord_set$beta_blocker+accord_set$vasodilator+accord_set$reserpine+accord_set$other_bpmed)
-# currentsmoker = (accord_set$cigarett==1)
-# formersmoker = (accord_set$smokelif==1)
-# ASPIRIN= accord_set$aspirin
-# STATIN = accord_set$statin
-# SUB_SENIOR = as.numeric(AGE>=75)
-# SUB_CKD = as.numeric(accord_set$gfr<60)
-# CHR = accord_set$chol
-# GLUR = accord_set$fpg
-# HDL = accord_set$hdl
-# TRR = accord_set$trig
-# UMALCR = accord_set$uacr
-# EGFR = accord_set$gfr
-# SCREAT = accord_set$screat
-# BMI = accord_set$wt_kg/((accord_set$ht_cm/1000)^2)/100
+write.csv(c2, "accord_cut.csv", row.names=FALSE)

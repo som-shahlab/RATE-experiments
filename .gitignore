@@ -38,4 +38,14 @@ vignettes/*.pdf
 # R Environment Variables
 .Renviron
 
+# Mac-specific files
+.DS_Store
+
+# Data files
+*.zip
 *.csv
+ACCORD_2017b_2
+SPRINT_2020b
+
+# Temp files
+*~

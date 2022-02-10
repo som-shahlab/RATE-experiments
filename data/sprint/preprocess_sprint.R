@@ -6,31 +6,27 @@
 
 library(Hmisc)
 library(matrixStats)
+library(sas7bdat)
 
 # ==== load relevant data
 
-# TODO: Set this according to your local environment. You should
-# place in this folder the unzipped SPRINT_2019a folder.
-path_to_sprint_data <- "~/Documents/GitHub/risk-vs-hte/data/sprint/"
-setwd(
-  paste0(
-    path_to_sprint_data, 
-    "SPRINT_2019a/SPRINT-POP/data/"
-  )
-)
+# TODO: If not calling from the command line, set this according to your 
+# local environment. You should place in this folder the 
+# unzipped SPRINT_2019a folder.
+setwd("~/Documents/GitHub/RATE-experiments/data/sprint/")
 
 ##########################
 # SANJAY'S ORIGINAL CODE #
 ##########################
 
 # Copied from https://github.com/sanjaybasu/sprint-challenge/blob/master/sprintorg.R
+# Copyright (c) 2020 Sanjay Basu, under MIT License
 
-library(sas7bdat)
-baseline = read.sas7bdat("baseline.sas7bdat")
-bp = read.sas7bdat("bp.sas7bdat")
-outcomes = read.sas7bdat("outcomes.sas7bdat")
-retention = read.sas7bdat("retention.sas7bdat")
-safety = read.sas7bdat("safety.sas7bdat")
+baseline = read.sas7bdat("SPRINT_2020b/SPRINT-POP/data/baseline.sas7bdat")
+bp = read.sas7bdat("SPRINT_2020b/SPRINT-POP/data/bp.sas7bdat")
+outcomes = read.sas7bdat("SPRINT_2020b/SPRINT-POP/data/outcomes.sas7bdat")
+retention = read.sas7bdat("SPRINT_2020b/SPRINT-POP/data/retention.sas7bdat")
+safety = read.sas7bdat("SPRINT_2020b/SPRINT-POP/data/safety.sas7bdat")
 bp_cut = bp[which(bp$VISITCODE=="RZ"),]
 sprint_set = merge(baseline,bp_cut,by="MASKID")
 sprint_set = merge(sprint_set,outcomes,by="MASKID")
@@ -41,7 +37,7 @@ sprint_set = merge(sprint_set,safety,by="MASKID")
 # TONY'S ADDITION TO SANJAY'S CODE #
 ####################################
 
-# load("sprint_cut.RData")
+# TODO: Remove the attach (for better style and less ambiguity)
 attach(sprint_set)
 
 hisp = (RACE4 == "HISPANIC")
@@ -92,18 +88,8 @@ c<-data.frame(
     CHR,  # Lab: Cholesterol, mg/dL
     HDL,  # Lab: HDL-cholesterol direct, mg/dL
     TRR,  # Lab: Triglycerides, mg/dL
-    BMI,  # Derived: Body Mass Index (kg/m^2)
+    BMI   # Derived: Body Mass Index (kg/m^2)
 )
 c=c[complete.cases(c),]
 
-setwd(path_to_sprint_data)
-write.csv(c, "./sprint_cut.csv", row.names=FALSE)
-
-# survcox_c <- coxph(data=c, Surv(fu.time, status) ~ AGE+FEMALE+RACE_BLACK+hisp+SBP.y+DBP.y+
-#                    N_AGENTS+currentsmoker+formersmoker+ASPIRIN+STATIN+SCREAT+CHR+
-#                    HDL+TRR+BMI+INTENSIVE*AGE+INTENSIVE*RACE_BLACK+
-#                    INTENSIVE*DBP.y+INTENSIVE*currentsmoker+INTENSIVE*HDL+
-#                    INTENSIVE*TRR)
-# summary(survcox_c)
-# survfit_c=survfit(survcox_c, newdata=c, se.fit=FALSE)
-# estinc_c=1-survfit_c$surv[dim(survfit_c$surv)[1],]
+write.csv(c, "sprint_cut.csv", row.names=FALSE)

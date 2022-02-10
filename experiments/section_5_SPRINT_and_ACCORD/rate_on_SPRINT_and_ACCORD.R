@@ -4,13 +4,18 @@
 # devtools::install_github("erikcs/grf", subdir = "r-package/grf", ref = "RATE")
 library(tidyverse, warn.conflicts=FALSE)
 
+# If calling from the command line, assign train.str and test.str to user specs
 args = commandArgs(trailingOnly=TRUE)
 train.str <- tolower(args[1])
 test.str <- tolower(args[2])
 
-# If not calling from the command line:
+# If not calling from the command line, set manually
+# setwd("~/Documents/GitHub/RATE-experiments/experiments/section_5_SPRINT_and_ACCORD/")
 # train.str <- "sprint"
 # test.str <- "accord"
+
+seed <- 42
+set.seed(seed)  # Required to get consistent results with the RATE
 
 SPRINT.df <- read_csv("../../data/sprint/sprint_cut.csv", show_col_types=FALSE)
 ACCORD.df <- read_csv("../../data/accord/accord_cut.csv", show_col_types=FALSE)
@@ -53,23 +58,26 @@ select.input.vars <- function(x) {
 
 # Prepare the train data
 X.train <- select.input.vars(train.df)
-Y.train <- train.df$t_cvds
+Y.train <- round(train.df$t_cvds)  # Coarsen failure times for efficiency
 W.train <- train.df$INTENSIVE
 D.train <- train.df$cvd
 
 # Prepare the test data
 X.test <- select.input.vars(test.df)
-Y.test <- test.df$t_cvds
+Y.test <- round(test.df$t_cvds)  # Coarsen failure times for efficiency
 W.test <- test.df$INTENSIVE
 D.test <- test.df$cvd
 
 # Standardize/coarsen the failure time grid across the two datasets
 Y.max <- round(365.25 * 3)
-failure.times <- 1:Y.max
+failure.times <- 0:Y.max  # ACCORD-BP has some individuals that are censored on day 0.
 
 # We anchor the lowest value for Y.test at 1 day
-# TODO: These individuals are being censored even before a day has passed
-Y.test[Y.test < 1] <- 1
+# (ACCORD-BP has follow-up times in years and when converted to days
+#  some of these end up being < 1 day, so we just round to 1 day, otherwise
+#  leads to issues with the grf failure.time argument)
+# Y.train[Y.train < 1] <- 1
+# Y.test[Y.test < 1] <- 1
 
 #########################################################################
 # TRAINING PRIORITIZATION RULES ON TRAIN, ESTIMATING PRIORITIES ON TEST #
@@ -110,9 +118,8 @@ train.model.CSF <- grf::causal_survival_forest(
   failure.times = failure.times,
   alpha = 0.05,  # Default value
   tune.parameters = "all",
-  seed = 42
+  seed = seed
 )
-
 # Generating predictions of the CSF train model on test
 priorities.on.test$CSF <- predict(train.model.CSF, newdata=X.test)$predictions
 
@@ -188,7 +195,7 @@ train.model.CPH.train <- survival::coxph(
   survival::Surv(time = Y, event = D) ~ . * W,
   data = design.matrix.train
 )
-summary(train.model.CPH.train)
+# summary(train.model.CPH.train)
 
 design.matrix.test <- X.test %>% select(-Diabetes)
 design.matrix.test.under.treatment <- design.matrix.test
@@ -216,12 +223,16 @@ eval.model.CSF <- grf::causal_survival_forest(
   honesty = TRUE,
   failure.times = failure.times,
   alpha = 0.05,
-  seed = 42
+  seed = seed
 )
+
+#############################################
+# ESTIMATING THE RATE (AUTOC, QINI) ON TEST #
+#############################################
 
 auc.results <- data.frame(
   prioritization_rule = character(2*ncol(priorities.on.test)),
-  method = character(2*ncol(priorities.on.test)),
+  target = character(2*ncol(priorities.on.test)),
   point_estimate = numeric(2*ncol(priorities.on.test)),
   ci_lb = numeric(2*ncol(priorities.on.test)),
   ci_ub = numeric(2*ncol(priorities.on.test)),
@@ -251,7 +262,7 @@ for(col in colnames(priorities.on.test)) {
   }
 }
 
-auc.results <- auc.results %>% arrange(method)
+auc.results <- auc.results %>% arrange(target)  # Sort by AUTOC vs. QINI
 auc.results %>% write_csv(paste0("train_on_", train.str, 
                                  "_test_on_", test.str,
                                  ".csv"))
