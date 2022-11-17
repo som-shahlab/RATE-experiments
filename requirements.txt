@@ -1,0 +1,5 @@
+econml>=0.12.0
+matplotlib>=3.5.1
+numpy>=1.21.2
+seaborn>=1.7.3
+tqdm>=4.62.3

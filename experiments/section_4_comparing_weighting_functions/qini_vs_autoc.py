@@ -10,15 +10,16 @@ and covariates.
 """
 
 import argparse
-import econml
-import matplotlib.pyplot as plt
-import matplotlib.font_manager as font_manager
-import matplotlib as mpl
-import numpy as np
 import os
+from typing import Callable, Iterable, Mapping, Optional, Tuple
+
+import econml
+import matplotlib as mpl
+import matplotlib.font_manager as font_manager
+import matplotlib.pyplot as plt
+import numpy as np
 import seaborn as sns
 from tqdm import tqdm
-from typing import Callable, Iterable, Mapping, Optional, Tuple
 
 
 def scaled_RATE(sorted_scores: np.ndarray, method: str = "AUTOC") -> float:
@@ -109,32 +110,27 @@ def aipw_func(
     else:
         outcome_hf = econml.grf.RegressionForest()
         outcome_hf.fit(
-            np.hstack([X, W]), Y
-        )  # Use an honest forest to estimate baseline model/outcomes
-        treated_preds = outcome_hf.predict(
-            np.hstack([X, np.ones_like(W)])
-        )  # Estimate outcome under treatment
-        control_preds = outcome_hf.predict(
-            np.hstack([X, np.zeros_like(W)])
-        )  # Estimate outcome under control
-        actual_preds = outcome_hf.predict(
-            np.hstack([X, W])
-        )  # Estimate outcomes under true/obs treatment assignment
+            np.hstack([X, W]),
+            Y)  # Use an honest forest to estimate baseline model/outcomes
+        treated_preds = outcome_hf.predict(np.hstack(
+            [X, np.ones_like(W)]))  # Estimate outcome under treatment
+        control_preds = outcome_hf.predict(np.hstack(
+            [X, np.zeros_like(W)]))  # Estimate outcome under control
+        actual_preds = outcome_hf.predict(np.hstack(
+            [X, W]))  # Estimate outcomes under true/obs treatment assignment
 
     # Standard formula to estimate AIPW scores
-    AIPW_scores = (
-        treated_preds.flatten()
-        - control_preds.flatten()
-        + ((W.flatten() - e_hat.flatten()) * (Y - actual_preds.flatten()))
-        / (e_hat * (1 - e_hat))
-    )
+    AIPW_scores = (treated_preds.flatten() - control_preds.flatten() +
+                   ((W.flatten() - e_hat.flatten()) *
+                    (Y - actual_preds.flatten())) / (e_hat * (1 - e_hat)))
 
     return AIPW_scores
 
 
-def ipw_func(
-    X: np.ndarray, Y: np.ndarray, W: np.ndarray, e: Optional[float] = 0.5
-) -> np.ndarray:
+def ipw_func(X: np.ndarray,
+             Y: np.ndarray,
+             W: np.ndarray,
+             e: Optional[float] = 0.5) -> np.ndarray:
     """Estimates Inverse Propensity Weight (IPW) scores
 
     Args:
@@ -197,10 +193,8 @@ def get_scores(X, Y, W, e=0.5, m=None, scoring_type="AIPW") -> np.ndarray:
     elif scoring_type == "Oracle" and m is not None:
         return aipw_func(X, Y, W, e, m)
     elif scoring_type == "Oracle" and m is None:
-        raise ValueError(
-            "Cannot provide oracle scores without ground "
-            "truth marginal response function!"
-        )
+        raise ValueError("Cannot provide oracle scores without ground "
+                         "truth marginal response function!")
     else:
         raise ValueError(f"Scoring method {scoring_type} not supported")
 
@@ -242,15 +236,17 @@ def response_fn(X: np.ndarray, W: np.ndarray, t: float) -> np.ndarray:
     if not np.all(W == 1):
         m[W == 0] = 0
     if not np.all(W == 0):
-        m[W == 1] = np.maximum(-2.0 / t**2.0 * X.flatten() + 2.0 / t, 0)[W == 1]
+        m[W == 1] = np.maximum(-2.0 / t**2.0 * X.flatten() + 2.0 / t,
+                               0)[W == 1]
     return m
 
 
 def generate_data(
-    N: int, p: float = 0.5, seed: int = 42
-) -> Tuple[
-    np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, Callable
-]:
+    N: int,
+    p: float = 0.5,
+    seed: int = 42
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray,
+           np.ndarray, Callable]:
     """Generate synthetic covariates and potential outcomes for each subject
 
     This function synthesizes samples with 1-dimensional covariates for X
@@ -266,7 +262,7 @@ def generate_data(
 
     Args:
         N: An integer representing the number of samples to generate
-        p: A float repreesnting the probability of treatment for each sample.
+        p: A float representing the probability of treatment for each sample.
             Also used as the proportion of samples for whom the difference in
             potential outcomes is exactly zero (see `response_fn`)
         seed: An (integer) random seed to enable reproducibility
@@ -337,9 +333,8 @@ def plot_auc_results(
     """
     # Initialize plot settings to produce LaTeX-style text
     mpl.rcParams["font.family"] = "serif"
-    cmfont = font_manager.FontProperties(
-        fname=mpl.get_data_path() + "/fonts/ttf/cmr10.ttf"
-    )
+    cmfont = font_manager.FontProperties(fname=mpl.get_data_path() +
+                                         "/fonts/ttf/cmr10.ttf")
     mpl.rcParams["font.serif"] = cmfont.get_name()
     mpl.rcParams["mathtext.fontset"] = "cm"
     mpl.rcParams["axes.unicode_minus"] = False
@@ -350,9 +345,9 @@ def plot_auc_results(
     }
     fig, axs = plt.subplots(2, figsize=(3, 5), dpi=300)
     for weight_type in ["QINI", "AUTOC"]:
-        sns.distplot(
-            auc_vec[weight_type], label=weight_type_dict[weight_type], ax=axs[0]
-        )
+        sns.distplot(auc_vec[weight_type],
+                     label=weight_type_dict[weight_type],
+                     ax=axs[0])
 
     axs[0].legend(
         title="Weighting",
@@ -387,6 +382,7 @@ def plot_auc_results(
     axs[1].set_ylabel("Treatment Effect", fontsize=10)
     axs[1].legend(edgecolor="black", facecolor="white", fontsize=10)
     plt.tight_layout()
+    os.makedirs(save_dir, exist_ok=True)
     plt.savefig(os.path.join(save_dir, fname))
     plt.close("all")
 
@@ -433,20 +429,23 @@ if __name__ == "__main__":
         for method in ["QINI", "AUTOC"]:
             auc_results[method] = []
             for b in range(args.n_sims):
-                X, W, Y, Y0, Y1, tau, m_fn = generate_data(
-                    N=args.n_samples, p=args.p_treat, seed=b
-                )
-                scores = get_scores(
-                    X, Y, W, e=args.p_treat, m=m_fn, scoring_type="Oracle"
-                )
+                X, W, Y, Y0, Y1, tau, m_fn = generate_data(N=args.n_samples,
+                                                           p=args.p_treat,
+                                                           seed=b)
+                scores = get_scores(X,
+                                    Y,
+                                    W,
+                                    e=args.p_treat,
+                                    m=m_fn,
+                                    scoring_type="Oracle")
                 auc_results[method] += [
                     scaled_RATE(scores[np.argsort(X)], method=method)
                 ]
 
         # Generate a reference set of data with a particular seed
-        X, W, _, Y0, Y1, tau, m_fn = generate_data(
-            N=args.n_samples, p=args.p_treat, seed=0
-        )
+        X, W, _, Y0, Y1, tau, m_fn = generate_data(N=args.n_samples,
+                                                   p=args.p_treat,
+                                                   seed=0)
         plot_auc_results(
             auc_results,
             X,
