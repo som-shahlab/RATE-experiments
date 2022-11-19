@@ -32,7 +32,7 @@ Data for the SPRINT and ACCORD-BP clinical trials are available to researchers f
 Data for the Criteo Uplift dataset can be found at https://ailab.criteo.com/criteo-uplift-prediction-dataset/.
 
 Data for the International Stroke trial can be accessed via the following link:  
-https://static-content.springer.com/esm/art%3A10.1186%2F1745-6215-12-101/MediaObjects/13063_2010_637_MOESM1_ESM.CSV
+https://static-content.springer.com/esm/art%3A10.1186%2F1745-6215-12-101/MediaObjects/13063_2010_637_MOESM1_ESM.CSV.
 Data are provided as part of a public release via "The International Stroke Trial database" in _Trials_ by Sandercock et al, 2011.
 
 ### Description
@@ -41,18 +41,18 @@ SPRINT and ACCORD-BP data were accessed under an NHLBI Research Materials Distri
 According to the Criteo website (https://ailab.criteo.com/criteo-uplift-prediction-dataset/):
 
 _Data description_  
-This dataset is constructed by assembling data resulting from several incrementality tests, a particular randomized trial procedure where a random part of the population is prevented from being targeted by advertising. it consists of 25M rows, each one representing a user with 11 features, a treatment indicator and 2 labels (visits and conversions).  
+This dataset is constructed by assembling data resulting from several incrementality tests, a particular randomized trial procedure where a random part of the population is prevented from being targeted by advertising. It consists of 25M rows, each one representing a user with 11 features, a treatment indicator and 2 labels (visits and conversions).  
 
 _Privacy_  
 For privacy reasons the data has been sub-sampled non-uniformly so that the original incrementality level cannot be deduced from the dataset while preserving a realistic, challenging benchmark. Feature names have been anonymized and their values randomly projected so as to keep predictive power while making it practically impossible to recover the original features or user context.  
 
 _Fields_  
 Here is a detailed description of the fields (they are comma-separated in the file):  
-f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11: feature values (dense, float)  
-treatment: treatment group (1 = treated, 0 = control)  
-conversion: whether a conversion occured for this user (binary, label)  
-visit: whether a visit occured for this user (binary, label)  
-exposure: treatment effect, whether the user has been effectively exposed (binary)  
+`f0`, `f1`, `f2`, `f3`, `f4`, `f5`, `f6`, `f7`, `f8`, `f9`, `f10`, f11: feature values (dense, float)  
+`treatment`: treatment group (1 = treated, 0 = control)  
+`conversion`: whether a conversion occured for this user (binary, label)  
+`visit`: whether a visit occured for this user (binary, label)  
+`exposure`: treatment effect, whether the user has been effectively exposed (binary)  
 
 ## Notes
 Contact the corresponding author for any additional information regarding data access and reproducibility.
