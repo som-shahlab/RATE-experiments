@@ -48,7 +48,7 @@ For privacy reasons the data has been sub-sampled non-uniformly so that the orig
 
 _Fields_  
 Here is a detailed description of the fields (they are comma-separated in the file):  
-`f0`, `f1`, `f2`, `f3`, `f4`, `f5`, `f6`, `f7`, `f8`, `f9`, `f10`, f11: feature values (dense, float)  
+`f0`, `f1`, `f2`, `f3`, `f4`, `f5`, `f6`, `f7`, `f8`, `f9`, `f10`, `f11`: feature values (dense, float)  
 `treatment`: treatment group (1 = treated, 0 = control)  
 `conversion`: whether a conversion occured for this user (binary, label)  
 `visit`: whether a visit occured for this user (binary, label)  
