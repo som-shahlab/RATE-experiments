@@ -9,11 +9,6 @@ args = commandArgs(trailingOnly=TRUE)
 train.str <- tolower(args[1])
 test.str <- tolower(args[2])
 
-# If not calling from the command line, set manually
-# setwd("~/Documents/GitHub/RATE-experiments/experiments/section_5_SPRINT_and_ACCORD/")
-# train.str <- "sprint"
-# test.str <- "accord"
-
 seed <- 42
 set.seed(seed)  # Required to get consistent results with the RATE
 
@@ -71,13 +66,6 @@ D.test <- test.df$cvd
 # Standardize/coarsen the failure time grid across the two datasets
 Y.max <- round(365.25 * 3)
 failure.times <- 0:Y.max  # ACCORD-BP has some individuals that are censored on day 0.
-
-# We anchor the lowest value for Y.test at 1 day
-# (ACCORD-BP has follow-up times in years and when converted to days
-#  some of these end up being < 1 day, so we just round to 1 day, otherwise
-#  leads to issues with the grf failure.time argument)
-# Y.train[Y.train < 1] <- 1
-# Y.test[Y.test < 1] <- 1
 
 #########################################################################
 # TRAINING PRIORITIZATION RULES ON TRAIN, ESTIMATING PRIORITIES ON TEST #
@@ -137,7 +125,6 @@ train.model.RSF <- grf::survival_forest(
   X = X.train[W.train == 0,],
   Y = Y.train.truncated[W.train == 0],
   D = D.train.truncated[W.train == 0],
-  # tune.parameters="all"
 )
 
 # Generating predictions of the RSF train model on test
@@ -161,7 +148,6 @@ X.test.modified$Gender <- ifelse(X.test$Female, "female", "male")
 # For the purposes of the Framingham Heart Risk Score and 
 # ASCVD Risk Calculator, we assume that subjects were not 
 # on a blood pressure medication at the start of the trial
-# TODO: Need to verify that this is indeed the case.
 X.test.modified$BP_Medications <- 0
 
 # Generate predictions of the Framingham 2008 10-year ASCVD risk model (with BMI)
@@ -186,7 +172,6 @@ priorities.on.test$Framingham <- ascvd.frs.results$ascvd_10y_frs_simple
 # COX PH MODEL # 
 #--------------#
 
-# library(survminer)
 design.matrix.train <- X.train %>% select(-Diabetes)
 design.matrix.train$Y <- Y.train
 design.matrix.train$D <- D.train
@@ -195,7 +180,6 @@ train.model.CPH.train <- survival::coxph(
   survival::Surv(time = Y, event = D) ~ . * W,
   data = design.matrix.train
 )
-# summary(train.model.CPH.train)
 
 design.matrix.test <- X.test %>% select(-Diabetes)
 design.matrix.test.under.treatment <- design.matrix.test
@@ -230,14 +214,15 @@ eval.model.CSF <- grf::causal_survival_forest(
 # ESTIMATING THE RATE (AUTOC, QINI) ON TEST #
 #############################################
 
+tmp.n.rows <- 2 * ncol(priorities.on.test)
 auc.results <- data.frame(
-  prioritization_rule = character(2*ncol(priorities.on.test)),
-  target = character(2*ncol(priorities.on.test)),
-  point_estimate = numeric(2*ncol(priorities.on.test)),
-  ci_lb = numeric(2*ncol(priorities.on.test)),
-  ci_ub = numeric(2*ncol(priorities.on.test)),
-  std_err = numeric(2 * ncol(priorities.on.test)),
-  p_value = numeric(2 * ncol(priorities.on.test)),
+  prioritization_rule = character(tmp.n.rows),
+  target = character(tmp.n.rows),
+  point_estimate = numeric(tmp.n.rows),
+  ci_lb = numeric(tmp.n.rows),
+  ci_ub = numeric(tmp.n.rows),
+  std_err = numeric(tmp.n.rows),
+  p_value = numeric(tmp.n.rows),
   stringsAsFactors = FALSE
 )
 
