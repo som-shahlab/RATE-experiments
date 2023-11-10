@@ -11,14 +11,17 @@ and covariates.
 
 import argparse
 import os
-from typing import Callable, Iterable, Mapping, Optional, Tuple
+from typing import Callable, Iterable, Mapping, Optional, Tuple, List
 
 import econml
+from econml import grf
 import matplotlib as mpl
 import matplotlib.font_manager as font_manager
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+import sklearn
+from sklearn.model_selection import KFold
 from tqdm import tqdm
 
 
@@ -55,6 +58,7 @@ def scaled_RATE(sorted_scores: np.ndarray, method: str = "AUTOC") -> float:
         H = np.flip(np.cumsum(rev_inv_rank)) - 1
     elif method == "QINI":
         rev_sort_u = np.arange(n, 0, -1) / n
+        # We explicitly center and scale the Qini coefficient
         H = (rev_sort_u - np.mean(rev_sort_u)) / np.std(rev_sort_u)
     else:
         raise ValueError(f"Method {method} is not supported")
@@ -68,6 +72,7 @@ def aipw_func(
     W: np.ndarray,
     e: Optional[float] = 0.5,
     m: Optional[Callable] = None,
+    n_folds: int = 2,
 ) -> np.ndarray:
     """Estimates Augmented Inverse Propensity Weight (AIPW) scores
 
@@ -80,7 +85,8 @@ def aipw_func(
             was treated and 0 otherwise. Note that only binary treatments are
             currently supported.
         e: A float that represents the probability the ith subject would be
-            treated (i.e., prob that W[i] = 1)
+            treated (i.e., prob that W[i] = 1). We assume known propensity
+            scores in this case.
         m: A function that takes in an [num_samples, num_features + 1] matrix
             representing the covariates for each subject and a final column
             representing treatment assignment and returns the estimated
@@ -93,9 +99,10 @@ def aipw_func(
         AIPW_Scores: A [N, 1] numpy array representing the estimated
             AIPW scores for each individual
     """
-    e_hat = np.repeat(e, X.shape[0])
+    n = X.shape[0]
+    e_hat = np.repeat(e, n)  # TODO: We do not yet support estimation of \hat{e}
 
-    # SHAPE HANDLING
+    # Shape handling to make sure everything works with eg sklearn, econml
     if len(W.shape) == 1:
         W = W.reshape(-1, 1)
     if len(X.shape) == 1:
@@ -103,34 +110,48 @@ def aipw_func(
     Y = Y.flatten()
 
     # AIPW scores for continuous and binary outcomes
-    if m is not None:
-        treated_preds = m(X, np.ones(X.shape[0]))
-        control_preds = m(X, np.zeros(X.shape[0]))
-        actual_preds = m(X, W.flatten())
+    if m is not None:  # If m is known then we generate oracle scores
+        mu_hat_1 = m(X, np.ones(n))
+        mu_hat_0 = m(X, np.zeros(n))
     else:
-        outcome_hf = econml.grf.RegressionForest()
-        outcome_hf.fit(
-            np.hstack([X, W]),
-            Y)  # Use an honest forest to estimate baseline model/outcomes
-        treated_preds = outcome_hf.predict(np.hstack(
-            [X, np.ones_like(W)]))  # Estimate outcome under treatment
-        control_preds = outcome_hf.predict(np.hstack(
-            [X, np.zeros_like(W)]))  # Estimate outcome under control
-        actual_preds = outcome_hf.predict(np.hstack(
-            [X, W]))  # Estimate outcomes under true/obs treatment assignment
+        mu_hat_1 = np.ones((n, 1)) * -np.infty
+        mu_hat_0 = np.ones((n, 1)) * -np.infty
+        kf = sklearn.model_selection.KFold(n_splits=n_folds, shuffle=True)
+        for train_idx, test_idx in kf.split(X):
+            n_test = len(test_idx)
 
-    # Standard formula to estimate AIPW scores
-    AIPW_scores = (treated_preds.flatten() - control_preds.flatten() +
-                   ((W.flatten() - e_hat.flatten()) *
-                    (Y - actual_preds.flatten())) / (e_hat * (1 - e_hat)))
+            # Use an honest forest to estimate baseline model/outcomes
+            outcome_model = econml.grf.RegressionForest()
+            outcome_model.fit(np.hstack([X[train_idx], W[train_idx]]), Y[train_idx])
+
+            # Predict outcomes under treatment for the held out individuals
+            mu_hat_1[test_idx] = outcome_model.predict(
+                np.hstack([X[test_idx], np.ones((n_test, 1))])
+            )
+
+            # Predict outcomes under control for the held out individuals
+            mu_hat_0[test_idx] = outcome_model.predict(
+                np.hstack([X[test_idx], np.zeros((n_test, 1))])
+            )
+
+        # Make sure we gave an estimate for every subject
+        assert not np.any(mu_hat_1 == -np.infty)
+        assert not np.any(mu_hat_0 == -np.infty)
+
+    # Use standard formula to estimate AIPW scores for each subject
+    AIPW_scores = (
+        mu_hat_1.flatten()
+        - mu_hat_0.flatten()
+        + W.flatten() / e_hat.flatten() * (Y - mu_hat_1.flatten())
+        - (1 - W.flatten()) / (1 - e_hat.flatten()) * (Y - mu_hat_0.flatten())
+    )
 
     return AIPW_scores
 
 
-def ipw_func(X: np.ndarray,
-             Y: np.ndarray,
-             W: np.ndarray,
-             e: Optional[float] = 0.5) -> np.ndarray:
+def ipw_func(
+    X: np.ndarray, Y: np.ndarray, W: np.ndarray, e: Optional[float] = 0.5
+) -> np.ndarray:
     """Estimates Inverse Propensity Weight (IPW) scores
 
     Args:
@@ -142,13 +163,17 @@ def ipw_func(X: np.ndarray,
             was treated and 0 otherwise. Note that only binary treatments are
             currently supported.
         e: A float that represents the probability the ith subject would be
-            treated (i.e., prob that W[i] = 1)
+            treated (i.e., prob that W[i] = 1). We assume known propensity
+            scores in this case.
 
     Returns:
         IPW_Scores: A [N, 1] numpy array representing the estimated AIPW scores
             for each individual
     """
     e_hat = np.repeat(e, X.shape[0])
+    W = W.flatten()
+    Y = Y.flatten()
+    e_hat = e_hat.flatten()
     IPW_scores = (W * Y / e_hat) - ((1.0 - W) * Y / (1.0 - e_hat))
     return IPW_scores
 
@@ -193,8 +218,10 @@ def get_scores(X, Y, W, e=0.5, m=None, scoring_type="AIPW") -> np.ndarray:
     elif scoring_type == "Oracle" and m is not None:
         return aipw_func(X, Y, W, e, m)
     elif scoring_type == "Oracle" and m is None:
-        raise ValueError("Cannot provide oracle scores without ground "
-                         "truth marginal response function!")
+        raise ValueError(
+            "Cannot provide oracle scores without ground "
+            "truth marginal response function!"
+        )
     else:
         raise ValueError(f"Scoring method {scoring_type} not supported")
 
@@ -236,17 +263,15 @@ def response_fn(X: np.ndarray, W: np.ndarray, t: float) -> np.ndarray:
     if not np.all(W == 1):
         m[W == 0] = 0
     if not np.all(W == 0):
-        m[W == 1] = np.maximum(-2.0 / t**2.0 * X.flatten() + 2.0 / t,
-                               0)[W == 1]
+        m[W == 1] = np.maximum(-2.0 / t**2.0 * X.flatten() + 2.0 / t, 0)[W == 1]
     return m
 
 
 def generate_data(
-    N: int,
-    p: float = 0.5,
-    seed: int = 42
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray,
-           np.ndarray, Callable]:
+    N: int, p: float = 0.5, frac_zero_cate: float = 0.5, seed: int = 42
+) -> Tuple[
+    np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, Callable
+]:
     """Generate synthetic covariates and potential outcomes for each subject
 
     This function synthesizes samples with 1-dimensional covariates for X
@@ -261,11 +286,15 @@ def generate_data(
     before adding i.i.d. noise.
 
     Args:
-        N: An integer representing the number of samples to generate
-        p: A float representing the probability of treatment for each sample.
-            Also used as the proportion of samples for whom the difference in
-            potential outcomes is exactly zero (see `response_fn`)
-        seed: An (integer) random seed to enable reproducibility
+        N : int
+            The number of samples to generate
+        p : float
+            The probability of treatment for each sample.
+        frac_zero_cate : float
+            The proportion of samples for whom the difference in potential
+            outcomes is exactly zero (see `response_fn`)
+        seed : int
+            Random seed to enable reproducibility
 
     Returns:
         X: A numpy array of shape [N, ] representing covariates for
@@ -288,7 +317,7 @@ def generate_data(
     np.random.seed(seed)
     X = np.random.uniform(size=N)
     W = (np.random.uniform(size=N) < p) * 1
-    m_fn = lambda X, W: response_fn(X, W, t=p)
+    m_fn = lambda X, W: response_fn(X, W, t=frac_zero_cate)
     m0 = m_fn(X, np.zeros(X.shape[0]))
     m1 = m_fn(X, np.ones(X.shape[0]))
     Y0 = m0 + np.random.randn(N) * 0.2
@@ -301,68 +330,202 @@ def generate_data(
     return X, W, Y, Y0, Y1, tau, m_fn
 
 
-def plot_auc_results(
-    auc_vec: Mapping[str, Iterable],
+def plot_score_comparisons(
+    qini_estimate_vecs: List[np.ndarray],
+    autoc_estimate_vecs: List[np.ndarray],
+    score_names: List[str],
+    save_dir: str,
+    fname: str,
+) -> None:
+    # Initialize plot settings to produce LaTeX-style text
+    mpl.rcParams["axes.formatter.use_mathtext"] = True
+    mpl.rcParams["font.family"] = "serif"
+    cmfont = font_manager.FontProperties(
+        fname=mpl.get_data_path() + "/fonts/ttf/cmr10.ttf"
+    )
+    mpl.rcParams["font.serif"] = cmfont.get_name()
+    mpl.rcParams["mathtext.fontset"] = "cm"
+    mpl.rcParams["axes.unicode_minus"] = False
+
+    # Set up the figure and axis
+    fig, axes = plt.subplots(1, 2, figsize=(5, 3), dpi=300)
+
+    for qini_estimates, autoc_estimates, score_name in zip(
+        qini_estimate_vecs, autoc_estimate_vecs, score_names
+    ):
+        # Left plot
+        sns.histplot(
+            autoc_estimates,
+            ax=axes[0],
+            label=score_name,
+            kde=True,
+            stat="density",
+            edgecolor="none",
+            bins=50,
+        )
+
+        # Right plot
+        sns.histplot(
+            qini_estimates,
+            ax=axes[1],
+            label=score_name,
+            kde=True,
+            stat="density",
+            edgecolor="none",
+            bins=50,
+        )
+
+    # Left plot
+    axes[0].set_title("AUTOC")
+    axes[0].set_xlabel("RATE")
+    axes[0].set_ylabel("Density")
+
+    # Right plot
+    axes[1].set_title("QINI Coefficient")
+    axes[1].set_xlabel("RATE")
+    axes[1].set_ylabel("")
+
+    # Legend
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="upper center",
+        ncol=1,
+        bbox_to_anchor=(0.5, 0.95),
+        title="Scoring",
+        facecolor="white",
+        fontsize=10,
+        framealpha=1,
+        edgecolor="black",
+    )
+
+    plt.tight_layout()
+    os.makedirs(save_dir, exist_ok=True)
+    plt.savefig(os.path.join(save_dir, fname))
+    plt.close("all")
+
+
+def plot_qini_vs_autoc(
+    qini_autoc_pairs: List[Tuple[np.ndarray, np.ndarray]],
     X: np.ndarray,
     tau: np.ndarray,
     Y0: np.ndarray,
     Y1: np.ndarray,
     save_dir: str,
     fname: str,
+    scoring_types: List[str] = None,
+    combine_plots: bool = False,
 ) -> None:
     """Plot AUTOC and Qini comparison together with potential outcomes given X
 
     Args:
-        auc_vec: A [num_samples, ] numpy array with shape representing
-            the RATE with element order corresponding to X
-        X: A [num_samples, ] numpy array with shape representing
-            N samples, each with 1-dimensional input covariates
-        tau: A [num_samples, ] numpy array representing the expected
-            difference in potential outcomes given covariates for
-            each sample
-        Y0: A [num_samples, ] numpy array representing the potential
-            outcome under control (no treatment) for each subject
-        Y1: A [num_samples, ] numpy array representing the potential
-            outcome under treatment for each subject
-        save_dir: A string representing the directory in which the
-            plot figures should be saved
-        fname: The filename that should be given to the saved plot
+        qini_autoc_pairs : List[Tuple[np.ndarray, np.ndarray]]
+            Each element in the list corresponds to a separate scoring function
+            (e.g., IPW scores, Oracle scores, AIPW scores).
+            For each pair of arrays in the list, the first array is
+            Qini estimates from B experiments, the second is AUTOC estimates
+            from B experiments, where B is the number of simulations performed.
+
+        X : np.ndarray
+            N samples, each with 1-D input covariates.
+
+        tau : np.ndarray
+            Expected difference in potential outcomes for each sample
+
+        Y0 : np.ndarray
+            Potential outcomes under control (no treatment) for each subject
+
+        Y1 : np.ndarray
+            Potential outcomes under treatment for each subject
+
+        save_dir : str
+            The directory in which the plot figures should be saved
+
+        fname : str
+            The filename that should be given to the saved plot
+
+        scoring_types : List[str]
+            The scoring types
+
+        combine_plots : bool
+            If True, combine all plots into a single figure with four rows
 
     Returns:
         Nothing, but saves an image in "save_dir/fname"
     """
     # Initialize plot settings to produce LaTeX-style text
+    mpl.rcParams["axes.formatter.use_mathtext"] = True
     mpl.rcParams["font.family"] = "serif"
-    cmfont = font_manager.FontProperties(fname=mpl.get_data_path() +
-                                         "/fonts/ttf/cmr10.ttf")
+    cmfont = font_manager.FontProperties(
+        fname=mpl.get_data_path() + "/fonts/ttf/cmr10.ttf"
+    )
     mpl.rcParams["font.serif"] = cmfont.get_name()
     mpl.rcParams["mathtext.fontset"] = "cm"
     mpl.rcParams["axes.unicode_minus"] = False
 
-    weight_type_dict = {
-        "QINI": "Qini Coefficient (Linear)",
-        "AUTOC": "AUTOC (Logarithmic)",
-    }
-    fig, axs = plt.subplots(2, figsize=(3, 5), dpi=300)
-    for weight_type in ["QINI", "AUTOC"]:
-        sns.distplot(auc_vec[weight_type],
-                     label=weight_type_dict[weight_type],
-                     ax=axs[0])
+    # Define the number of rows for the plots, 2 rows for histograms + 1 row for scatter plot
+    num_rows = len(qini_autoc_pairs) + 1 if combine_plots else 2
 
-    axs[0].legend(
-        title="Weighting",
-        bbox_to_anchor=(0.5, 1.4),
-        loc="upper center",
-        edgecolor="black",
-        facecolor="white",
-        framealpha=1.0,
-        fontsize=10,
-    )
-    axs[0].set_xlabel(r"$\widehat{RATE}$  Distribution", fontsize=10)
-    axs[0].set_ylabel("Density", fontsize=10)
-    axs[1].scatter(
-        X[np.argsort(X)],
-        (Y1 - Y0)[np.argsort(X)],
+    fig, axs = plt.subplots(num_rows, figsize=(3, 5 * num_rows // 2), dpi=300)
+
+    min_RATE = np.infty
+    max_RATE = -np.infty
+    for qini_estimates, autoc_estimates in qini_autoc_pairs:
+        tmp_min = min(np.min(qini_estimates), np.min(autoc_estimates))
+        if tmp_min < min_RATE:
+            min_RATE = tmp_min
+        tmp_max = max(np.max(qini_estimates), np.max(autoc_estimates))
+        if tmp_max > max_RATE:
+            max_RATE = tmp_max
+    hist_bins = np.linspace(min_RATE, max_RATE, num=50)
+
+    for idx, ((qini_estimates, autoc_estimates), scoring_type) in enumerate(
+        zip(qini_autoc_pairs, scoring_types)
+    ):
+        ax_hist = axs[idx] if combine_plots else axs[0]
+
+        sns.histplot(
+            qini_estimates,
+            kde=True,
+            stat="density",
+            label="Qini Coefficient (Linear)",
+            ax=ax_hist,
+            edgecolor="none",
+            bins=hist_bins,
+        )
+        sns.histplot(
+            autoc_estimates,
+            kde=True,
+            stat="density",
+            label="AUTOC (Logarithmic)",
+            ax=ax_hist,
+            edgecolor="none",
+            bins=hist_bins,
+        )
+
+        ax_hist.legend(
+            title="Weighting",
+            bbox_to_anchor=(0.5, 1.4),
+            loc="upper center",
+            edgecolor="black",
+            facecolor="white",
+            framealpha=1.0,
+            fontsize=10,
+        )
+        x_label = r"$\widehat{RATE}$ Distribution"
+        if scoring_type:
+            x_label += f" ({scoring_type} scores)"
+        ax_hist.set_xlabel(x_label, fontsize=10)
+        ax_hist.set_ylabel("Density", fontsize=10)
+        ax_hist.set_xlim(min_RATE, max_RATE)
+
+    # Plot scatter plot only once, either as the last subplot or separately if not combined
+    ax_scatter = axs[-1]
+    sorted_indices = np.argsort(X)
+    ax_scatter.scatter(
+        X[sorted_indices],
+        (Y1 - Y0)[sorted_indices],
         alpha=1.0,
         s=15,
         linewidth=0.5,
@@ -370,17 +533,20 @@ def plot_auc_results(
         edgecolors="#999999",
         label=r"$Y(1) - Y(0)$",
     )
-    axs[1].plot(
-        X[np.argsort(X)],
-        tau[np.argsort(X)],
+    ax_scatter.plot(
+        X[sorted_indices],
+        tau[sorted_indices],
         linewidth=1.0,
         color="#984ea3",
         alpha=0.8,
         label=r"$\tau(X)$",
     )
-    axs[1].set_xlabel("$X$", fontsize=10)
-    axs[1].set_ylabel("Treatment Effect", fontsize=10)
-    axs[1].legend(edgecolor="black", facecolor="white", fontsize=10)
+    # ax_scatter.set_title("Individual Treatment Effects and CATE")
+    ax_scatter.set_xlabel("$X$", fontsize=10)
+    ax_scatter.set_ylabel("Treatment Effect", fontsize=10)
+    ax_scatter.legend(edgecolor="black", facecolor="white", fontsize=10)
+
+    # fig.subplots_adjust(hspace=0.1)
     plt.tight_layout()
     os.makedirs(save_dir, exist_ok=True)
     plt.savefig(os.path.join(save_dir, fname))
@@ -415,43 +581,93 @@ if __name__ == "__main__":
         help="Directory in which generated images should be saved",
     )
     parser.add_argument(
-        "--num_scrambled",
+        "--frac_zero_cate",
         nargs="+",
-        default=[0, 500, 900],
+        default=[1.0, 0.5, 0.1],
         help='List where each element "l" represents an experiment '
         'in which "l" out of 1000 subjects have CATE = 0, on avg',
     )
     args = parser.parse_args()
 
-    for num_scrambled_out_of_1000 in tqdm(args.num_scrambled):
-        frac_scrambled = num_scrambled_out_of_1000 / 1000.0
-        auc_results = {}
-        for method in ["QINI", "AUTOC"]:
-            auc_results[method] = []
-            for b in range(args.n_sims):
-                X, W, Y, Y0, Y1, tau, m_fn = generate_data(N=args.n_samples,
-                                                           p=args.p_treat,
-                                                           seed=b)
-                scores = get_scores(X,
-                                    Y,
-                                    W,
-                                    e=args.p_treat,
-                                    m=m_fn,
-                                    scoring_type="Oracle")
-                auc_results[method] += [
-                    scaled_RATE(scores[np.argsort(X)], method=method)
-                ]
+    weighting_functions = ["QINI", "AUTOC"]
+    scoring_types = ["IPW", "AIPW", "Oracle"]
+
+    # Initialize the results dictionary
+    RATE_estimates = {}
+    for frac in args.frac_zero_cate:
+        for weight_fn in weighting_functions:
+            for scoring_type in scoring_types:
+                RATE_estimates[(frac, weight_fn, scoring_type)] = []
+
+    # Simulations take about 75 minutes on a MacBook Pro w/
+    # a 2.6 GHz 6-core Intel Core i7 processor and 16 GB 2667 MHz DDR4 RAM
+    for frac in args.frac_zero_cate:
+        print(f"Running simulations with {frac * 100:.0f}% non-zero CATE")
+        for b in tqdm(range(args.n_sims)):
+            X, W, Y, Y0, Y1, tau, m_fn = generate_data(
+                N=args.n_samples,
+                p=args.p_treat,
+                frac_zero_cate=frac,
+                seed=b,
+            )
+            for scoring_type in scoring_types:
+                scores = get_scores(
+                    X, Y, W, e=args.p_treat, m=m_fn, scoring_type=scoring_type
+                )
+                for weight_fn in weighting_functions:
+                    RATE_estimates[(frac, weight_fn, scoring_type)] += [
+                        scaled_RATE(scores[np.argsort(X)], method=weight_fn)
+                    ]
 
         # Generate a reference set of data with a particular seed
-        X, W, _, Y0, Y1, tau, m_fn = generate_data(N=args.n_samples,
-                                                   p=args.p_treat,
-                                                   seed=0)
-        plot_auc_results(
-            auc_results,
-            X,
-            tau,
-            Y0,
-            Y1,
+        X, W, _, Y0, Y1, tau, m_fn = generate_data(
+            N=args.n_samples, p=args.p_treat, frac_zero_cate=frac, seed=0
+        )
+
+        # Generate the pairs for each scoring type
+        qini_autoc_pairs = [
+            (
+                RATE_estimates[(frac, "QINI", scoring_type)],
+                RATE_estimates[(frac, "AUTOC", scoring_type)],
+            )
+            for scoring_type in scoring_types
+        ]
+
+        # Filename for the combined plot
+        fname = f"combined_{int(frac * 100)}_pct_have_nonzero_cate.png"
+
+        # Call the modified plot function with the combined flag set to True
+        plot_qini_vs_autoc(
+            qini_autoc_pairs=qini_autoc_pairs,
+            X=X,
+            tau=tau,
+            Y0=Y0,
+            Y1=Y1,
             save_dir=args.out_dir,
-            fname=f"{int(frac_scrambled * 1000)}_out_of_1000_scrambled.png",
+            fname=fname,
+            scoring_types=scoring_types,
+            combine_plots=True,  # Set to True to combine all plots into a single figure
+        )
+        # plot_qini_vs_autoc(
+        #     qini_estimates=RATE_estimates[(frac, "QINI", scoring_type)],
+        #     autoc_estimates=RATE_estimates[(frac, "AUTOC", scoring_type)],
+        #     X=X,
+        #     tau=tau,
+        #     Y0=Y0,
+        #     Y1=Y1,
+        #     save_dir=args.out_dir,
+        #     fname=fname,
+        #     scoring_type=scoring_type,
+        # )
+
+        plot_score_comparisons(
+            qini_estimate_vecs=[
+                RATE_estimates[(frac, "QINI", score)] for score in scoring_types
+            ],
+            autoc_estimate_vecs=[
+                RATE_estimates[(frac, "AUTOC", score)] for score in scoring_types
+            ],
+            score_names=scoring_types,
+            save_dir=args.out_dir,
+            fname=f"score_comparisons_for_{int(frac * 100)}_pct_nonzero.png",
         )
