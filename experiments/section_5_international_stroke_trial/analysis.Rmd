@@ -1,0 +1,699 @@
+---
+title: "Analyzing HTEs in the International Stroke Trial with the RATE"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup
+
+```{r}
+library(tidyverse)
+library(rms)  # For restricted cubic splines (`rcs`) in the GLM T-Learner model
+
+# Set the seed for reproducibility
+SEED <- 0
+set.seed(SEED)
+```
+
+# Data Preprocessing
+
+We can load the dataset directly from the article in Scientific Reports:
+https://doi.org/10.1186/1745-6215-12-101
+
+```{r}
+all.df <- read.csv("https://static-content.springer.com/esm/art%3A10.1186%2F1745-6215-12-101/MediaObjects/13063_2010_637_MOESM1_ESM.CSV")
+```
+
+Following [Nguyen et al (2020)](https://doi.org/10.1016/j.jclinepi.2020.05.022)
+we map each subject to a general region and then form train/test splits at
+the hospital level, stratified by region (eg, so that the proportion of 
+hospitals in North America assigned to the train split approximately equals 
+the proportion of hospitals in Europe assigned to the train split)
+
+```{r}
+# See https://trialsjournal.biomedcentral.com/articles/10.1186/1745-6215-12-101/tables/1
+africa <- c(
+  21  # South Africa
+)
+
+europe <- c(
+  43,  # Albania
+  02,  # Austria
+  03,  # Belgium
+  04,  # Bulgaria
+  07,  # Czech Republic
+  08,  # Denmark
+  09,  # Ireland
+  10,  # Finland
+  11,  # France
+  12,  # Germany
+  31,  # Greece
+  36,  # Hungary
+  14,  # Italy
+  39,  # Latvia
+  15,  # Netherlands
+  17,  # Norway
+  18,  # Poland
+  19,  # Portugal
+  33,  # Romania
+  44,  # Slovak Republic
+  20,  # Slovenia
+  22,  # Spain
+  24,  # Sweden
+  25,  # Switzerland
+  27   # UK
+)
+
+middle.east <- c(
+  32,  # Georgia
+  13,  # Israel
+  35   # Turkey
+)
+
+north.america <- c(
+  05,  # Canada,
+  28   # USA
+)
+
+north.asia <- c(
+  30,  # Hong Kong
+  38   # Japan
+)
+
+oceania <- c(
+  01,  # Australia
+  16   # New Zealand
+)
+
+south.america <- c(
+  29,  # Argentina
+  42,  # Brazil
+  06   # Chile
+)
+
+south.asia <- c(
+  37,  # India
+  41,  # Indonesia
+  40,  # Malaysia
+  34,  # Singapore
+  23,  # Sri Lanka
+  26   # Thailand
+)
+
+all.df$REGION <- NA
+all.df$REGION[all.df$CNTRYNUM %in% africa] <- "africa"
+all.df$REGION[all.df$CNTRYNUM %in% europe] <- "europe"
+all.df$REGION[all.df$CNTRYNUM %in% middle.east] <- "middle east"
+all.df$REGION[all.df$CNTRYNUM %in% north.america] <- "north america"
+all.df$REGION[all.df$CNTRYNUM %in% north.asia] <- "north asia"
+all.df$REGION[all.df$CNTRYNUM %in% oceania] <- "oceania"
+all.df$REGION[all.df$CNTRYNUM %in% south.america] <- "south america"
+all.df$REGION[all.df$CNTRYNUM %in% south.asia] <- "south asia"
+
+# Make sure that every observation is assigned a non-null region
+stopifnot(sum(is.na(all.df$REGION)) == 0)
+
+# Should be the numbers 1 through 45 in order
+# sort(unique(c(africa, europe, middle.east, north.america, north.asia, oceania, south.america, south.asia)))
+```
+
+There were 150 / 19435 = 0.7% of patients who did not have a recorded outcome
+and 984 / 19435 = 5% of patients for whom atrial fibrillation was not recorded
+(during the pilot phase).  
+We drop those patients from our analysis.
+
+```{r}
+all.df <- all.df %>%
+  mutate(
+    # OCCODE = Six month outcome 
+    # (1-dead/2-dependent/3-not recovered/4-recovered/0 or 9 - missing status)
+    OCCODE = na_if(OCCODE, 0),  # "Unknown" outcome is mapped to NA
+    OCCODE = na_if(OCCODE, 9),   # Another proxy value for "Unknown"
+  ) %>%
+  mutate(  # Atrial fibrillation (Y/N), not coded for pilot phase
+    RATRIAL = na_if(RATRIAL, "")
+  ) %>%
+  mutate(  # Aspirin within 3 days prior to randomisation (Y/N)
+    RASP3 = na_if(RASP3, "")  # Neither "Y" nor "N" suggests NA
+  )
+```
+
+```{r}
+all.df <- all.df %>% drop_na(OCCODE, RATRIAL, RASP3)
+```
+
+Convert categorical variables to factors:
+
+```{r}
+all.df <- all.df %>%
+  mutate(
+    SEX =      as.factor(SEX),
+    RCT =      as.factor(RCT),
+    RVISINF =  as.factor(RVISINF),
+    RATRIAL =   as.factor(RATRIAL),
+    RASP3 =     as.factor(RASP3),
+    RCONSC =   relevel(as.factor(RCONSC), ref="F"),   # Ref = "Fully alert"
+    STYPE =    relevel(as.factor(STYPE), ref="OTH"),  # Ref = "Other"
+    RDEF1 =    relevel(as.factor(RDEF1), ref="N"),
+    RDEF2 =    relevel(as.factor(RDEF2), ref="N"),
+    RDEF3 =    relevel(as.factor(RDEF3), ref="N"),
+    RDEF4 =    relevel(as.factor(RDEF4), ref="N"),
+    RDEF5 =    relevel(as.factor(RDEF5), ref="N"),
+    RDEF6 =    relevel(as.factor(RDEF6), ref="N"),
+    RDEF7 =    relevel(as.factor(RDEF7), ref="N"),
+    RDEF8 =    relevel(as.factor(RDEF8), ref="N"),
+    REGION =    relevel(as.factor(REGION), ref="europe"),
+  )
+```
+
+We select a subset of relevant variables for our analysis. See
+https://trialsjournal.biomedcentral.com/articles/10.1186/1745-6215-12-101/tables/2 
+for a complete list of the variables available and their descriptions. The 
+variables we selected are the same as those used in
+[Nguyen et al (2020)](https://doi.org/10.1016/j.jclinepi.2020.05.022), in order
+to enable direct comparison.
+
+```{r}
+all.df <- all.df %>%
+  select(
+    ### HOSPITAL ID (used for randomization) ###
+    HOSPNUM,  # Hospital number
+    
+    ### OUTCOME ###
+    OCCODE,  
+    
+    ### TREATMENT INDICATOR ###
+    RXASP,  # Trial aspirin allocated (Y/N)
+    
+    ### PREDICTORS ###
+    RDELAY,  # Delay between stroke and randomisation in hours
+    RCONSC,  # Conscious state at randomization (F - fully alert, D - drowsy, U - unconscious)
+    SEX,  # M = male; F = female
+    AGE,  # Age in years
+    RSLEEP,  # Symptoms noted on waking (Y/N)
+    RATRIAL,  # Atrial fibrillation (Y/N)
+    RCT,  # CT before randomization (Y/N)
+    RVISINF,  # Infarct visible on CT (Y/N)
+    RASP3,  # Aspirin within 3 days prior to randomization (Y/N)
+    RSBP,  # Systolic blood pressure at randomization (mm Hg)
+    RDEF1,  # Face deficit (Y/N/C=can't assess)
+    RDEF2,  # Arm/hand deficit (Y/N/C=can't assess)
+    RDEF3,  # Leg/foot deficit (Y/N/C=can't assess)
+    RDEF4,  # Dysphasia (Y/N/C=can't assess)
+    RDEF5,  # Hemianopia (Y/N/C=can't assess)
+    RDEF6,  # Visuospatial disorder (Y/N/C=can't assess)
+    RDEF7,  # Brainstem/cerebellar signs (Y/N/C=can't assess)
+    RDEF8,  # Other deficit (Y/N/C=can't assess)
+    STYPE,  # Stroke subtype (TACS/PACS/POCS/LACS/OTH=other)
+    REGION  # See above (used for randomization)
+  )
+```
+
+We split the dataset into a "train" and "test" set at the hospital level, 
+stratified by global region. We train models (Random Forest, Logistic Regression
+T-Learner, Causal Forest) on the "train" set
+and then evaluate them using measures like the RATE on the "test" set.
+
+```{r}
+train.hospitals <- NULL
+for (r in levels(all.df$REGION)) {
+  hospitals.in.region <- unique(all.df$HOSPNUM[all.df$REGION == r])
+  tmp.hospitals <- sample(
+    hospitals.in.region,
+    (1/2) * length(hospitals.in.region),
+    replace = FALSE
+  )
+  train.hospitals <- c(train.hospitals, tmp.hospitals)
+}
+train.df <- all.df %>% filter(HOSPNUM %in% train.hospitals)
+test.df <- all.df %>% filter(!(HOSPNUM %in% train.hospitals))
+
+# Prepare the "train" set
+X.train <- train.df %>% select(-HOSPNUM, -OCCODE, -RXASP)
+X.train.mat <- model.matrix(~0 + ., data=X.train)
+# OCCODE: 1 == dead, 2 == dependent (both at 6 months)
+# Y: 1 == dead/dependent @ 6 mo
+Y.train <- if_else(train.df$OCCODE == 1 | train.df$OCCODE == 2, 1, 0)  
+W.train <- if_else(train.df$RXASP == "Y", 1, 0)
+
+# Prepare the "test" set
+X.test <- test.df %>% select(-HOSPNUM, -OCCODE, -RXASP)
+X.test.mat <- model.matrix(~0 + ., data=X.test)
+Y.test <- if_else(test.df$OCCODE == 1 | test.df$OCCODE == 2, 1, 0)  
+W.test <- if_else(test.df$RXASP == "Y", 1, 0)
+
+# Prepare a dataframe to hold the results of our analysis
+priorities.on.test <- data.frame(
+  CF = numeric(nrow(X.test)),
+  GLMTLearner = numeric(nrow(X.test)),
+  RFRisk = numeric(nrow(X.test))
+)
+```
+
+# Model Training
+
+We train a Causal Survival Forest to estimate the CATE directly.
+
+```{r}
+# Training a Causal Survival Forest model on "train" set
+train.model.CF <- grf::causal_forest(
+  X = X.train.mat,
+  Y = Y.train,
+  W = W.train,
+  # Use prop. treated individuals as W.hat = E[W | X_i] for everyone (RCT)
+  W.hat = rep(mean(W.train), length(W.train)),
+  honesty = TRUE,
+  tune.parameters = "all",
+  seed = SEED
+)
+
+# Generating predictions of the CSF model on "test" set
+priorities.on.test$CF <- predict(train.model.CF, newdata=X.test.mat)$predictions
+```
+
+We evaluate the quality of fit for our Causal Forest in terms of calibration
+
+```{r}
+grf::test_calibration(train.model.CF)
+```
+
+Next, we train a T-Learner with logistic regression base models, following
+"Counterfactual clinical prediction models could help to infer individualized 
+treatment effects in randomized controlled trials" by Nguyen et al (2020):
+https://doi.org/10.1016/j.jclinepi.2020.05.022
+
+```{r}
+# Code adapted from https://doi.org/10.1016/j.jclinepi.2020.05.022 for 
+# purposes of direct comparison
+train.model.TLearner.treated <- glm(
+  outcome ~ 
+    rcs(AGE, 3) + rcs(RSBP, 3) +  # Restricted cubic splines with 3 knots
+    RDELAY + SEX + RCONSC + RCT + RVISINF + 
+    STYPE + RDEF1 + RDEF2 + RDEF3 + RDEF4 + RDEF5 + RDEF6 + RDEF7 + RDEF8 + 
+    RATRIAL + RASP3 + REGION,
+  # Train on just the treated units
+  data = cbind(outcome=Y.train[W.train == 1], train.df[W.train == 1,]),  
+  family="binomial"  # Binary outcomes -> Logistic regression
+)
+
+train.model.TLearner.controls <- glm(
+  outcome ~ 
+    rcs(AGE, 3) + rcs(RSBP, 3) +
+    RDELAY + SEX + RCONSC + RCT + RVISINF + 
+    STYPE + RDEF1 + RDEF2 + RDEF3 + RDEF4 + RDEF5 + RDEF6 + RDEF7 + RDEF8 + 
+    RATRIAL + RASP3 + REGION,
+  data = cbind(outcome=Y.train[W.train == 0], train.df[W.train == 0,]),  
+  family="binomial"
+)
+
+# Estimate Y(1) for every subject in the test set
+test.preds.1 <- predict(train.model.TLearner.treated, test.df, "response")
+
+# Estimate Y(0) for every subject in the test set
+test.preds.0 <- predict(train.model.TLearner.controls, test.df, "response")
+
+# Estimate Y(1) - Y(0) for every subject in the test set
+priorities.on.test$GLMTLearner <- test.preds.1 - test.preds.0
+```
+
+We evaluate the fit of the T-Learner by examining the discrimination and 
+calibration of the base models. Both appear to be well-calibrated with 
+good discrimination.
+
+```{r}
+CalibrationCurves::val.prob.ci.2(
+  test.preds.1[W.test == 1],
+  Y.test[W.test == 1],
+  main="Logistic Regression T-Learner Calibration (Treated Group)"
+)
+CalibrationCurves::val.prob.ci.2(
+  test.preds.0[W.test == 0],
+  Y.test[W.test == 0],
+  main="Logistic Regression T-Learner Calibration (Control Group)"
+)
+```
+
+To enable direct comparison with the approach employed by 
+[Kent et al. 2016](https://doi.org/10.1093/ije/dyw118) we also train a 
+linear (logistic) regression model to predict the outcome, independent of 
+treatment.
+
+```{r}
+train.model.linear.risk <- glm(
+  outcome ~ 
+    rcs(AGE, 3) + rcs(RSBP, 3) +
+    RDELAY + SEX + RCONSC + RCT + RVISINF + 
+    STYPE + RDEF1 + RDEF2 + RDEF3 + RDEF4 + RDEF5 + RDEF6 + RDEF7 + RDEF8 + 
+    RATRIAL + RASP3 + REGION,
+  data = cbind(outcome=Y.train, train.df),  
+  family="binomial"
+)
+
+# Estimate Y for every subject in the test set, irrespective of treatment
+priorities.on.test$LRRisk <- predict(train.model.linear.risk, test.df, "response")
+```
+
+```{r}
+CalibrationCurves::val.prob.ci.2(
+  priorities.on.test$LRRisk,
+  Y.test,
+  main="Logistic Regression Risk Model Calibration"
+)
+```
+
+Next we train a random forest to estimate risk, trained just on those 
+individuals who were _not_ assigned aspirin at randomization. Note the difference
+in approach relative to [Kent et al. 2016](https://doi.org/10.1093/ije/dyw118).
+
+```{r}
+# Training a Random Survival Forest model on "train" set
+train.model.RF.controls <- grf::regression_forest(
+  X = X.train.mat[W.train == 0,],
+  Y = Y.train[W.train == 0],
+  tune.parameters = "all",
+  seed = SEED
+)
+
+# Generating predictions of the RF train model on test
+priorities.on.test$RFRisk <- predict(
+  train.model.RF.controls, 
+  newdata=X.test.mat)$predictions
+```
+
+Evaluate quality of fit for random forest model in terms of calibration, AUROC
+
+```{r}
+CalibrationCurves::val.prob.ci.2(
+  priorities.on.test$RFRisk[W.test == 0],
+  Y.test[W.test == 0],
+  # priorities.on.test$RFRisk,
+  # Y.test,
+  main="Random Forest Risk Model Calibration"
+)
+```
+# Model Evaluation
+
+## Estimating Doubly Robust Scores on the Test Set
+
+First we fit a Causal Forest with honest fitting to the test set (in order
+to generate our doubly robust scores).
+
+```{r}
+eval.model.CF <- grf::causal_forest(
+  X = X.test.mat,
+  Y = Y.test,
+  W = W.test,
+  W.hat = rep(mean(W.test), length(W.test)),
+  honesty = TRUE,
+  tune.parameters = "all",
+  seed = SEED
+)
+```
+
+Then we calculate AIPW scores using the evaluation forest
+
+```{r}
+# Compute ATE from AIPW
+tau.hat <- predict(eval.model.CF)$predictions
+e.hat <- eval.model.CF$W.hat # P[W=1|X]
+m.hat <- eval.model.CF$Y.hat # E[Y|X]
+mu.hat.0 <- m.hat - e.hat * tau.hat        # E[Y|X,W=0] = E[Y|X]-e(X)*tau(X)
+mu.hat.1 <- m.hat + (1 - e.hat) * tau.hat  # E[Y|X,W=1] = E[Y|X]+(1-e(X))*tau(X)
+aipw.scores <- (tau.hat + 
+                  W.test / e.hat * (Y.test -  mu.hat.1) - 
+                  (1 - W.test) / (1 - e.hat) * (Y.test -  mu.hat.0))
+
+# Note that we could equivalently just call grf::get_scores,
+# but we show calculations above for didactic transparency
+# sum(aipw.scores != grf::get_scores(eval.model.CF))  # Should equal 0
+```
+
+## Rank-Weighted Average Treatment Effect (RATE)
+
+Finally, we evaluate how well our Random Forest, T-Learner,and  Causal Forest
+perform in terms of the RATE (i.e., how well do the stratify the "test" set
+by estimated treatment effect)
+
+```{r}
+# A wrapper function for calculating the RATE + plotting the TOC curve
+# NOTE: This is non-deterministic; set seed beforehand for reproducibility
+analyze.RATE <- function(eval.model, priorities, title.str, target="AUTOC") {
+  rate.obj <- grf::rank_average_treatment_effect(
+    forest = eval.model,  # The evaluation set forest
+    target = target,  # Type of RATE estimate/weighting function ("QINI" vs. "AUTOC")
+    priorities = priorities,  # Treatment prioritization scores S(X_i)
+    q = seq(0.005, 1, by = 0.005),  # The grid to compute TOC on (granularity)
+    R = 1000  # Number of bootstrap replicates for the SEs
+  )
+  plot.title <- sprintf(
+      title.str,
+      rate.obj$estimate,  # RATE estimate
+      rate.obj$estimate - qnorm(0.975) * rate.obj$std.err,  # 95% CI lower bound
+      rate.obj$estimate + qnorm(0.975) * rate.obj$std.err,  # 95T CI upper bound
+      2 * pnorm(-abs(rate.obj$estimate)/rate.obj$std.err)  # P-value (2-sided)
+  )
+  plot(rate.obj, main=plot.title)  # Plot the TOC curve
+}
+```
+
+RATE of the Random Forest Risk model
+
+```{r}
+set.seed(SEED)
+analyze.RATE(
+  eval.model = eval.model.CF, 
+  priorities = priorities.on.test$RFRisk, 
+  title.str = "TOC - Random Forest Risk\nRATE = %.4f (%.4f, %.4f), P = %.3f",
+  target = "AUTOC"
+)
+```
+
+RATE of the Logistic Regression Risk model (following 
+[Kent et al. 2016](https://doi.org/10.1093/ije/dyw118)).
+
+```{r}
+set.seed(SEED)
+analyze.RATE(
+  eval.model = eval.model.CF, 
+  priorities = priorities.on.test$LRRisk, 
+  title.str = "TOC - Logistic Regression Risk\nRATE = %.4f (%.4f, %.4f), P = %.3f",
+  target = "AUTOC"
+)
+```
+
+RATE of the Causal Forest
+
+```{r}
+set.seed(SEED)
+analyze.RATE(
+  eval.model = eval.model.CF, 
+  priorities = -priorities.on.test$CF, 
+  title.str = "TOC - Causal Forest\nRATE = %.4f (%.4f, %.4f), P = %.3f",
+  target = "AUTOC"
+)
+```
+
+RATE of the Logistic Regression T-Learner
+
+```{r}
+set.seed(SEED)
+analyze.RATE(
+  eval.model = eval.model.CF, 
+  priorities = priorities.on.test$GLMTLearner, 
+  title.str = "TOC - Logistic Regression T-Learner\nRATE = %.4f (%.4f, %.4f), P = %.3f",
+  target = "AUTOC"
+)
+```
+
+# Comparison to Alternative Approaches for Testing HTEs
+
+```{r include=FALSE}
+# Check that the risk-adjusted treatment effect is significant, consistent
+# with the original trial results
+simple.model <- glm(
+  outcome ~ treatment,
+  data=data.frame(
+    outcome=Y.test,
+    treatment=W.test
+  ),
+  family="binomial"
+)
+lmtest::coeftest(
+  simple.model,
+  vcov=sandwich::vcovHC(simple.model, type="HC2")
+)
+```
+
+## Linear Model with Interaction Terms
+
+We compare our results to those obtained by 
+[Kent et al. 2016](https://doi.org/10.1093/ije/dyw118) on the IST (using
+a traditional linear modeling approach with a treatment $\times$ risk
+interaction term).
+
+```{r}
+# Testing for HTEs on the absolute risk difference scale:
+# interaction.model <- lm(
+#   outcome ~ risk * treatment,
+#   data=data.frame(
+#     outcome=Y.test,
+#     # risk = test.preds.0,  # Could also use the linear model risk
+#     risk=priorities.on.test$RFRisk,
+#     treatment=W.test
+#   )
+# )
+
+# Testing for HTEs on the proportional scale
+interaction.model <- glm(
+  outcome ~ risk * treatment,
+  data=data.frame(
+    outcome=Y.test,
+    risk=priorities.on.test$RFRisk,  # Could also use the linear model risk
+    treatment=W.test
+  ),
+  family="binomial"
+)
+lmtest::coeftest(
+  interaction.model,
+  vcov=sandwich::vcovHC(interaction.model, type="HC2")
+)
+```
+
+## CATE by Risk Quintile
+
+Taking a common but heuristic approach to understanding treatment effect
+heterogeneity captured by our random forest model, we calculate the ATE within
+each quintile of Random Forest Risk scores on the test set.
+
+```{r}
+# Rank observations by the predicted risk under the random forest model
+num.rankings <- 5
+priorities <- priorities.on.test$RFRisk  # TODO: Extract as a numeric vector
+priorities.quantiles <- quantile(priorities, probs = seq(0, 1, by=1/num.rankings))
+ranking <- cut(priorities, priorities.quantiles, include.lowest=TRUE, labels=seq(num.rankings))
+
+ols <- lm(aipw.scores ~ 0 + factor(ranking))
+forest.ate <- data.frame("aipw", paste0("Q", seq(num.rankings)), lmtest::coeftest(ols, vcov=sandwich::vcovHC(ols, "HC2"))[,1:2])
+colnames(forest.ate) <- c("method", "ranking", "estimate", "std.err")
+rownames(forest.ate) <- NULL # just for display
+forest.ate
+```
+
+We can view the same results visually:
+
+```{r}
+res <- forest.ate
+
+ggplot(res) +
+  aes(x = ranking, y = estimate) + #, group=method, color=method) + 
+  geom_point(position=position_dodge(0.2)) +
+  geom_errorbar(
+    aes(ymin=estimate-1.96*std.err, ymax=estimate+1.96*std.err), 
+    width=.2, position=position_dodge(0.2)
+  ) +
+  ylab("Absolute Risk Difference (Treatment - Control)") + xlab("Risk Quintile") +
+  ggtitle("Average CATE within each ranking (stratified by RF Risk)") +
+  theme_bw() +
+  theme(legend.position="bottom", legend.title = element_blank())
+
+ggsave("~/Downloads/CATE_by_risk_quintile.png", device="png", dpi=300)
+```
+
+Is there a significant difference between the 
+highest- and lowest-risk quintiles?
+
+```{r}
+t.test(aipw.scores[ranking == 1], aipw.scores[ranking == 5])
+```
+
+# Epilogue: How you can fool yourself into a false positive result
+
+If you do the trick of comparing the group predicted to benefit against the
+group predicted to be harmed on the same split you used for training the base
+models, you will likely obtain a result suggesting heterogeneity...
+
+```{r}
+# Estimate Y(1) for every subject in the test set
+train.preds.1 <- predict(train.model.TLearner.treated, train.df, "response")
+
+# Estimate Y(0) for every subject in the test set
+train.preds.0 <- predict(train.model.TLearner.controls, train.df, "response")
+
+# Estimate Y(1) - Y(0) for every subject in the test set
+train.ite.est <- train.preds.1 - train.preds.0
+
+print("Estimated ATE amongst individuals expected to benefit (train set)")
+print(
+  mean(Y.train[(W.train == 1) & (train.ite.est <= 0)]) - 
+  mean(Y.train[(W.train == 0) & (train.ite.est <= 0)])
+)
+print("Estimated ATE amongst individuals _not_ expected to benefit (train set)")
+print(
+  mean(Y.train[(W.train == 1) & (train.ite.est > 0)]) - 
+  mean(Y.train[(W.train == 0) & (train.ite.est > 0)])
+)
+```
+
+But what happens when we run the same procedure on the test set? (eg, without
+succumbing to overfitting)
+
+```{r}
+test.ite.est <- priorities.on.test$GLMTLearner
+print("Estimated ATE amongst individuals expected to benefit (test set)")
+print(
+  mean(Y.test[(W.test == 1) & (test.ite.est <= 0)]) - 
+  mean(Y.test[(W.test == 0) & (test.ite.est <= 0)])
+)
+print("Estimated ATE amongst individuals _not_ expected to benefit (test set)")
+print(
+  mean(Y.test[(W.test == 1) & (test.ite.est > 0)]) - 
+  mean(Y.test[(W.test == 0) & (test.ite.est > 0)])
+)
+```
+
+Oh no! Looks like whatever treatment effect heterogeneity we saw in the train
+set attenuated substantially when we evaluated on the test set.
+
+Let's be a bit more rigorous about evaluating the ATE in each stratum using
+AIPW scores.
+
+What is the estimated ATE for individuals expected to benefit ($\widehat{ITE} \leq 0$)? 
+
+```{r}
+ate.est.pred.benefit <- mean(aipw.scores[test.ite.est <= 0])
+ate.se.pred.benefit <- sd(aipw.scores[test.ite.est <= 0]) / sqrt(sum(test.ite.est <= 0))
+ate.tstat.pred.benefit <- ate.est.pred.benefit / ate.se.pred.benefit
+ate.pred.benefit.results <- c(
+  estimate = ate.est.pred.benefit,
+  std.error = ate.se.pred.benefit,
+  t.stat = ate.tstat.pred.benefit,
+  pvalue = 2 * pnorm(-abs(ate.tstat.pred.benefit))
+)
+print(ate.pred.benefit.results)
+```
+
+What is the estimated ATE for individuals _not_ expected to benefit ($\widehat{ITE} > 0$)? 
+
+```{r}
+ate.est.pred.harm <- mean(aipw.scores[test.ite.est > 0])
+ate.se.pred.harm <- sd(aipw.scores[test.ite.est > 0]) / sqrt(sum(test.ite.est > 0))
+ate.tstat.pred.harm <- ate.est.pred.harm / ate.se.pred.harm
+ate.pred.harm.results <- c(
+  estimate=ate.est.pred.harm,
+  std.error=ate.se.pred.harm,
+  t.stat = ate.tstat.pred.harm,
+  pvalue = 2 * pnorm(-abs(ate.tstat.pred.harm))
+)
+print(ate.pred.harm.results)
+```
+
+We can also specifically test whether or not there's a difference in treatment
+effect between the two strata. Here, the answer is no... (at least not at 
+level alpha=0.05)
+
+```{r}
+t.test(aipw.scores[test.ite.est <= 0], aipw.scores[test.ite.est > 0])
+```
