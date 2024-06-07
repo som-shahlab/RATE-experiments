@@ -5,19 +5,19 @@
 library(tidyverse, warn.conflicts=FALSE)
 
 # If calling from the command line, assign train.str and test.str to user specs
-args = commandArgs(trailingOnly=TRUE)
-train.str <- tolower(args[1])
-test.str <- tolower(args[2])
-estimand <- args[3]  # Should be "survival.probability" or "RMST"
+# args = commandArgs(trailingOnly=TRUE)
+# train.str <- tolower(args[1])
+# test.str <- tolower(args[2])
+# estimand <- args[3]  # Should be "survival.probability" or "RMST"
 
 # If not calling from the command line, set manually
-# setwd("~/Documents/GitHub/RATE-experiments/experiments/section_5_SPRINT_and_ACCORD/")
-# train.str <- "accord"
-# test.str <- "sprint"
-# estimand <- "survival.probability"
+setwd("~/Documents/GitHub/RATE-experiments/experiments/section_5_SPRINT_and_ACCORD/")
+train.str <- "combined"
+test.str <- "combined"
+estimand <- "survival.probability"
 # train.str <- "combined"
 # test.str <- "combined"
-# estimand <- "survival.probability"
+# estimand <- "RMST"
 
 seed <- 42
 set.seed(seed)  # Required to get consistent results with the RATE
@@ -157,10 +157,12 @@ estimate.rmst <- function(S, unique.times, end.time) {
 
 priorities.on.test <- data.frame(
   CSF = numeric(nrow(X.test)),
-  RSF = numeric(nrow(X.test)),
   CoxPHSLearner = numeric(nrow(X.test)),
-  ASCVD = numeric(nrow(X.test)),
-  Framingham = numeric(nrow(X.test))
+  RSF = numeric(nrow(X.test)),
+  Framingham.w.Labs = numeric(nrow(X.test)),
+  ASCVD = numeric(nrow(X.test))
+  # Framingham = numeric(nrow(X.test))
+  
 )
 
 #------------------------#
@@ -221,26 +223,24 @@ X.test.modified <- X.test
 X.test.modified$race <- ifelse(X.test$black, "aa", "white")
 X.test.modified$gender <- ifelse(X.test$female, "female", "male")
 
-# For the purposes of the Framingham Heart Risk Score and 
-# ASCVD Risk Calculator, we assume that subjects were not 
-# on a blood pressure medication at the start of the trial
+# See https://github.com/vcastro/CVrisk/blob/master/R/ascvd_10y_frs.R#LL91C45-L91C45
 X.test.modified$BP_Medications <- (X.test.modified$BP_medications > 0) * 1
 
 source("risk_calculators.R")
 
-adapted.ascvd.frs.results <- adapted_compute_CVrisk(
-  df = X.test.modified,
-  age = "age",
-  gender = "gender",
-  race = "race",
-  sbp = "SBP",
-  bmi = "BMI",
-  hdl = "HDL_cholesterol",
-  totchol = "cholesterol",
-  bp_med = "BP_medications",
-  smoker = "current_smoker",
-  diabetes = "diabetes"
-)
+# adapted.ascvd.frs.results <- adapted_compute_CVrisk(
+#   df = X.test.modified,
+#   age = "age",
+#   gender = "gender",
+#   race = "race",
+#   sbp = "SBP",
+#   bmi = "BMI",
+#   hdl = "HDL_cholesterol",
+#   totchol = "cholesterol",
+#   bp_med = "BP_medications",
+#   smoker = "current_smoker",
+#   diabetes = "diabetes"
+# )
 
 # Generate predictions of the Framingham 2008 10-year ASCVD risk model (with BMI)
 ascvd.frs.results <- CVrisk::compute_CVrisk(
@@ -257,12 +257,12 @@ ascvd.frs.results <- CVrisk::compute_CVrisk(
   diabetes = "diabetes"
 )
 priorities.on.test$ASCVD <- ascvd.frs.results$ascvd_10y_accaha
-priorities.on.test$Framingham <- ascvd.frs.results$ascvd_10y_frs_simple
+# priorities.on.test$Framingham <- ascvd.frs.results$ascvd_10y_frs_simple
 priorities.on.test$Framingham.w.Labs <- ascvd.frs.results$ascvd_10y_frs
 
-priorities.on.test$Extrapolated.ASCVD <- adapted.ascvd.frs.results$adapted_ascvd_10y_accaha
-priorities.on.test$Extrapolated.Framingham <- adapted.ascvd.frs.results$adapted_ascvd_10y_frs_simple
-priorities.on.test$Extrapolated.Framingham.w.Labs <- adapted.ascvd.frs.results$adapted_ascvd_10y_frs
+# priorities.on.test$Extrapolated.ASCVD <- adapted.ascvd.frs.results$adapted_ascvd_10y_accaha
+# priorities.on.test$Extrapolated.Framingham <- adapted.ascvd.frs.results$adapted_ascvd_10y_frs_simple
+# priorities.on.test$Extrapolated.Framingham.w.Labs <- adapted.ascvd.frs.results$adapted_ascvd_10y_frs
 # View(cbind(test.df[, c("black", "female", "age", "cholesterol", "HDL_cholesterol", "SBP", "DBP", "BP_medications", "current_smoker", "diabetes")], priorities.on.test))
 
 # Check against https://tools.acc.org/ldl/ascvd_risk_estimator/index.html
@@ -359,7 +359,7 @@ for(col in colnames(priorities.on.test)) {
   for(target in c("QINI", "AUTOC")) {
     tmp.RATE <- grf::rank_average_treatment_effect(
       forest = eval.model.CSF,
-      target = target,
+      target = target,  # AUTOC vs. QINI
       priorities = priorities.on.test[, col],
       subset = which(!is.na(priorities.on.test[, col])),
       R = 1000
@@ -378,7 +378,11 @@ for(col in colnames(priorities.on.test)) {
   }
 }
 
+hist(priorities.on.test$CSF)
+hist(priorities.on.test$RSF)
+
 auc.results <- auc.results %>% arrange("Prioritization Rule")  # Sort by AUTOC vs. QINI
+auc.results[auc.results$`RATE Metric` == "AUTOC",]
 auc.results %>% write_csv(paste0("train_on_", train.str, 
                                  "_test_on_", test.str,
                                  "_estimating_", estimand,

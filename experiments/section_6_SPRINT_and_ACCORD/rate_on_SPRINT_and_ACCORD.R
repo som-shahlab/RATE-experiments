@@ -234,6 +234,7 @@ for(col in colnames(priorities.on.test)) {
       forest = eval.model.CSF,
       target = target,
       priorities = priorities.on.test[, col],
+      subset = which(!is.na(priorities.on.test[, col])),
       R = 1000
     )
     auc.results[i, "prioritization_rule"] <- col
