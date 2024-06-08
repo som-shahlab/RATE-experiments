@@ -37,7 +37,13 @@ if (train.str == "sprint" && test.str == "accord") {
   test.df <- combined.df[-train.indxs,]
 }
 
-# A function to both select input columns and rename them to something reasonable
+#' Select and Rename Input Variables
+#'
+#' This function selects a predefined set of input columns from a data frame 
+#' and renames them to more reasonable names if necessary.
+#'
+#' @param x A data frame containing the variables to be selected.
+#' @return A data frame with the selected columns
 select.input.vars <- function(x) {
   x %>% select(
     age,
@@ -88,7 +94,6 @@ failure.times <- 0:Y.max  # ACCORD-BP has some individuals that are censored on 
 #' @param unique.times A vector of unique time points corresponding to the columns of the survival matrix S.
 #' @param end.time The end time up to which the RMST is calculated.
 #' @return A vector of RMST values for each individual in the survival matrix S.
-#' @export
 #' @examples
 #' S <- matrix(c(1, 0.8, 0.6, 1, 0.9, 0.7), nrow = 2, byrow = TRUE)
 #' unique.times <- c(1, 2, 3)
