@@ -155,4 +155,4 @@ df <- df %>%
     t_primary
   )
 
-df %>% drop_na() %>% write_csv("data/accord_cut.csv")
+df %>% drop_na() %>% write_csv("data/accord_preprocessed.csv")

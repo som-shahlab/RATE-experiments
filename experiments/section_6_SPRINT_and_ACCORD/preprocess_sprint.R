@@ -75,4 +75,4 @@ df <- df %>%
     t_primary
   )
 
-df %>% drop_na() %>% write_csv("data/sprint_cut.csv")
+df %>% drop_na() %>% write_csv("data/sprint_preprocessed.csv")

@@ -39,8 +39,13 @@ gen.row.tex <- function(prio.rule.long, prio.rule.abbrev, res.df) {
 #' @examples
 #' gen.table.tex("accord", "sprint")
 #' gen.table.tex("sprint", "accord")
-gen.table.tex <- function(train.str, test.str) {
-  fname <- paste0("train_on_", train.str, "_test_on_", test.str, ".csv")
+gen.table.tex <- function(train.str, test.str, estimand = "RMST") {
+  fname <- paste0(
+    "train_on_", train.str, 
+    "_test_on_", test.str,
+    "_estimating_", estimand,
+    ".csv"
+  )
   res.df <- read_csv(fname)
   if (train.str == "sprint" && test.str == "accord") {
     n.train <- 9069
