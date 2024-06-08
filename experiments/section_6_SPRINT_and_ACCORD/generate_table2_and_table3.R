@@ -8,7 +8,7 @@ library(tidyverse)
 #' @param df The data frame containing the results
 #' @return A subset of the data frame filtered by the specified prioritization rule and target "AUTOC"
 get.row.data <- function(prio.rule, df) {
-  df[df$prioritization_rule == prio.rule & df$target == "AUTOC",]
+  df[df$`Prioritization Rule` == prio.rule & df$`RATE Metric` == "AUTOC",]
 }
 
 #' Generate a LaTeX table row for a given prioritization rule
@@ -21,10 +21,10 @@ gen.row.tex <- function(prio.rule.long, prio.rule.abbrev, res.df) {
   tmp.res <- get.row.data(prio.rule.abbrev, res.df)
   tmp.str <- ""
   tmp.str <- paste0(tmp.str, "\t", prio.rule.long, " & ")
-  tmp.str <- paste0(tmp.str, round(tmp.res$point_estimate, 2), " ")
-  tmp.str <- paste0(tmp.str, "(", round(tmp.res$ci_lb, 2), ", ")
-  tmp.str <- paste0(tmp.str, round(tmp.res$ci_ub, 2), ")")
-  tmp.str <- paste0(tmp.str, " & ", round(tmp.res$p_value, 2), " \\\\\n")
+  tmp.str <- paste0(tmp.str, round(tmp.res$`RATE Point Estimate`, 2), " ")
+  tmp.str <- paste0(tmp.str, "(", round(tmp.res$`CI Lower Bound`, 2), ", ")
+  tmp.str <- paste0(tmp.str, round(tmp.res$`CI Upper Bound`, 2), ")")
+  tmp.str <- paste0(tmp.str, " & ", round(tmp.res$`P-value`, 2), " \\\\\n")
   tmp.str
 }
 
@@ -82,5 +82,5 @@ gen.table.tex <- function(train.str, test.str, estimand = "RMST") {
 }
 
 # Generate LaTeX tables and write to files
-writeLines(gen.table.tex("accord", "sprint"), "table1.tex")
-writeLines(gen.table.tex("sprint", "accord"), "table2.tex")
+writeLines(gen.table.tex("accord", "sprint"), "table2.tex")
+writeLines(gen.table.tex("sprint", "accord"), "table3.tex")
