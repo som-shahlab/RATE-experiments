@@ -2,10 +2,23 @@
 
 library(tidyverse)
 
-get.row.data <- function(prio.rule, tmp.df) {
-  tmp.df[tmp.df$prioritization_rule == prio.rule & tmp.df$target == "AUTOC",]
+#' Extract data for a specific prioritization rule
+#'
+#' @param prio.rule The abbreviation of the prioritization rule
+#' @param df The data frame containing the results
+#' @return A subset of the data frame filtered by the specified prioritization rule and target "AUTOC"
+#' @export
+get.row.data <- function(prio.rule, df) {
+  df[df$prioritization_rule == prio.rule & df$target == "AUTOC",]
 }
 
+#' Generate a LaTeX table row for a given prioritization rule
+#'
+#' @param prio.rule.long The full name of the prioritization rule
+#' @param prio.rule.abbrev The abbreviation of the prioritization rule
+#' @param res.df The data frame containing the results
+#' @return A string representing a LaTeX table row with the point estimate, confidence interval, and p-value
+#' @export
 gen.row.tex <- function(prio.rule.long, prio.rule.abbrev, res.df) {
   tmp.res <- get.row.data(prio.rule.abbrev, res.df)
   tmp.str <- ""
@@ -17,6 +30,15 @@ gen.row.tex <- function(prio.rule.long, prio.rule.abbrev, res.df) {
   tmp.str
 }
 
+#' Generate the LaTeX code for a table
+#'
+#' @param train.str The name of the training dataset (either "sprint" or "accord")
+#' @param test.str The name of the testing dataset (either "sprint" or "accord")
+#' @return A string representing the LaTeX code for the table
+#' @export
+#' @examples
+#' gen.table.tex("accord", "sprint")
+#' gen.table.tex("sprint", "accord")
 gen.table.tex <- function(train.str, test.str) {
   fname <- paste0("train_on_", train.str, "_test_on_", test.str, ".csv")
   res.df <- read_csv(fname)
@@ -57,5 +79,6 @@ gen.table.tex <- function(train.str, test.str) {
   tab <- paste0(tab, "\\end{table}")
 }
 
+# Generate LaTeX tables and write to files
 writeLines(gen.table.tex("accord", "sprint"), "table1.tex")
 writeLines(gen.table.tex("sprint", "accord"), "table2.tex")
