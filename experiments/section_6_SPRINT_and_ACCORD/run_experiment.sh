@@ -1,16 +1,34 @@
 #!/bin/bash
 
+echo "============================================================\n\n"
+
 # Preprocess the SPRINT data
-Rscript ../../data/accord/preprocess_accord.R
+echo "Preprocessing the SPRINT data...\n"
+Rscript preprocess_sprint.R
+
+echo "============================================================\n\n"
 
 # Preprocess the ACCORD-BP data
-Rscript ../../data/sprint/preprocess_sprint.R
+echo "Preprocessing the ACCORD-BP data...\n"
+Rscript preprocess_accord.R
 
-# Train on SPRINT, test on ACCORD-BP
-Rscript rate_on_SPRINT_and_ACCORD.R sprint accord
+echo "============================================================\n\n"
 
-# Train on ACCORD-BP, test on SPRINT
-Rscript rate_on_SPRINT_and_ACCORD.R accord sprint
+# Train on ACCORD-BP, test on SPRINT (Table 2 in the paper)
+echo "Running with train=ACCORD-BP, test=SPRINT, estimand=RMST"
+Rscript rate_on_SPRINT_and_ACCORD.R accord sprint RMST
 
-# Generate tables from the output of the above
-Rscript generate_table1_and_table2.R
+echo "============================================================\n\n"
+
+# Train on SPRINT, test on ACCORD-BP (Table 3 in the paper)
+echo "Running with train=SPRINT, test=ACCORD-BP, estimand=RMST"
+Rscript rate_on_SPRINT_and_ACCORD.R sprint accord RMST
+
+echo "============================================================\n\n"
+
+# Train on a 50/50 split of combined SPRINT/ACCORD-BP (Section D.3 in Supplement)
+echo "Running with train=Combined, test=Combined, estimand=RMST"
+Rscript rate_on_SPRINT_and_ACCORD.R combined combined RMST
+
+# Generate LaTeX tables from the output of the above
+Rscript generate_table2_and_table3.R
