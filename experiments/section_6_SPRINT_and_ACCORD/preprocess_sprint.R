@@ -18,9 +18,9 @@ incl.excl.df <- incl.excl.df %>% select(-HDL)  # Use HDL from SPRINT-POP
 
 # Merge all the dataframes into a single dataframe 
 df <- baseline.df %>% 
-  left_join(outcomes.df, by="MASKID") %>%
-  left_join(history.df, by="MASKID") %>%
-  left_join(incl.excl.df, by="MASKID")
+  left_join(outcomes.df, by = "MASKID") %>%
+  left_join(history.df, by = "MASKID") %>%
+  left_join(incl.excl.df, by = "MASKID")
 
 # To compare SPRINT and ACCORD-BP we need to slightly modify
 # the primary outcome for sprint, specifically we need to 

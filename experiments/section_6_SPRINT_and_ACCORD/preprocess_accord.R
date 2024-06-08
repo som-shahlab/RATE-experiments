@@ -36,13 +36,13 @@ accord.key <- accord.key %>% filter(
 
 # Join all the datasets into a single dataframe
 df <- accord.key %>% 
-  left_join(blood.pressure, by="MaskID") %>% 
-  left_join(concomitant.meds, by="MaskID") %>% 
-  left_join(lipids, by="MaskID") %>%
-  left_join(other.labs, by="MaskID") %>%
-  left_join(cvd.outcomes, by="MaskID") %>%
-  left_join(history, by="MaskID") %>%
-  left_join(incl.excl, by="MaskID")
+  left_join(blood.pressure, by = "MaskID") %>% 
+  left_join(concomitant.meds, by = "MaskID") %>% 
+  left_join(lipids, by = "MaskID") %>%
+  left_join(other.labs, by = "MaskID") %>%
+  left_join(cvd.outcomes, by = "MaskID") %>%
+  left_join(history, by = "MaskID") %>%
+  left_join(incl.excl, by = "MaskID")
 
 # Collect all the variables that are easy to derive/compute
 df <- df %>% mutate(
