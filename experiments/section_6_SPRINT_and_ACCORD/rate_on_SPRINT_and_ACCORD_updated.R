@@ -5,24 +5,24 @@
 library(tidyverse, warn.conflicts=FALSE)
 
 # If calling from the command line, assign train.str and test.str to user specs
-# args = commandArgs(trailingOnly=TRUE)
-# train.str <- tolower(args[1])
-# test.str <- tolower(args[2])
-# estimand <- args[3]  # Should be "survival.probability" or "RMST"
+args = commandArgs(trailingOnly=TRUE)
+train.str <- tolower(args[1])
+test.str <- tolower(args[2])
+estimand <- args[3]  # Should be "survival.probability" or "RMST"
 
 # If not calling from the command line, set manually
-setwd("~/Documents/GitHub/RATE-experiments/experiments/section_5_SPRINT_and_ACCORD/")
-train.str <- "combined"
-test.str <- "combined"
-estimand <- "survival.probability"
+# setwd("~/Documents/GitHub/RATE-experiments/experiments/section_5_SPRINT_and_ACCORD/")
+# train.str <- "combined"
+# test.str <- "combined"
+# estimand <- "survival.probability"
 # train.str <- "combined"
 # test.str <- "combined"
 # estimand <- "RMST"
 
 seed <- 42
 set.seed(seed)  # Required to get consistent results with the RATE
-SPRINT.df <- read_csv("../../data/sprint/sprint_cut_updated.csv", show_col_types=FALSE)
-ACCORD.df <- read_csv("../../data/accord/accord_cut_updated.csv", show_col_types=FALSE)
+SPRINT.df <- read_csv("data/sprint_cut.csv", show_col_types=FALSE)
+ACCORD.df <- read_csv("data/accord_cut.csv", show_col_types=FALSE)
 
 # Set the train/test data according to command-line argument
 if (train.str == "sprint" && test.str == "accord") {
@@ -202,7 +202,6 @@ train.model.RSF <- grf::survival_forest(
   X = X.train[W.train == 0,],
   Y = Y.train.truncated[W.train == 0],
   D = D.train.truncated[W.train == 0],
-  # tune.parameters="all"
 )
 
 # Generating predictions of the RSF train model on test
@@ -211,7 +210,7 @@ priorities.on.test$RSF <- estimate.rmst(
   S = RSF.pred.results$predictions, 
   unique.times = RSF.pred.results$failure.times, 
   end.time = Y.max
-) * -1  # We use negative of the RMST because we want to prioritize highest those individuals at greatest risk
+) * -1  # We use negative RMST because we want to prioritize highest those individuals at greatest risk
 
 #----------------------------------------------------#
 # FRAMINGHAM HEART RISK SCORE & ASCVD RISK ESTIMATOR #
