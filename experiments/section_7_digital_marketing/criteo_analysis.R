@@ -12,12 +12,20 @@ data = read_csv(data_loc)
 # print(aggregate(data[,c("visit", "conversion")], list(data$treatment), mean))
 
 set.seed(seed)
-subsamp = data %>% mutate(traintest = sample(0:1, n(), replace = TRUE)) %>% group_by(traintest, treatment) %>% sample_n(ns) %>% ungroup() %>% group_by(traintest) %>% group_split()
+subsamp = data %>% 
+  mutate(traintest = sample(0:1, n(), replace = TRUE)) %>% 
+  group_by(traintest, treatment) %>% 
+  sample_n(ns) %>% 
+  ungroup() %>% 
+  group_by(traintest) %>% 
+  group_split()
+
 test_subsamp = subsamp[[2]]
 subsamp = subsamp[[1]]
-train_features = model.matrix(~.-conversion-treatment-exposure-visit-traintest, data=subsamp)
+train_features = model.matrix( ~ . - conversion - treatment - exposure -
+                                 visit - traintest, data = subsamp)
 
-save(test_subsamp, file="test_subsamp.Rdata")
+save(test_subsamp, file = "test_subsamp.Rdata")
 # load("test_subsamp.Rdata")
 
 
@@ -28,36 +36,86 @@ print("Average conversion:")
 print(mean(test_subsamp$conversion))
 print(t.test(test_subsamp$conversion)$"conf.int")
 print("Per arm train")
-print(aggregate(subsamp[,c("visit", "conversion")], list(subsamp$treatment), mean))
+print(aggregate(subsamp[, c("visit", "conversion")], list(subsamp$treatment), mean))
 print("Per arm test")
-print(aggregate(test_subsamp[,c("visit", "conversion")], list(test_subsamp$treatment), mean))
+print(aggregate(test_subsamp[, c("visit", "conversion")], list(test_subsamp$treatment), mean))
 
-test_features = model.matrix(~.-conversion-treatment-exposure-visit-traintest, data=test_subsamp)
+test_features = model.matrix( ~ . - conversion - treatment - exposure -
+                                visit - traintest, data = test_subsamp)
 
-model = grf::regression_forest(X=train_features[subsamp$treatment==0, ], Y=subsamp$conversion[subsamp$treatment==0], mtry=mtry, honesty=honestly, min.node.size=min_node_size)
-save(model, file="baseline_model.Rdata")
+model = grf::regression_forest(
+  X = train_features[subsamp$treatment == 0,],
+  Y = subsamp$conversion[subsamp$treatment == 0],
+  mtry = mtry,
+  honesty = honestly,
+  min.node.size = min_node_size
+)
+save(model, file = "baseline_model.Rdata")
 # load("baseline_model.Rdata")
-preds = predict(model, newdata=test_features)$predictions
+preds = predict(model, newdata = test_features)$predictions
 
-cate_model = grf::causal_forest(X=train_features, Y=subsamp$conversion, W=subsamp$treatment, W.hat=rep(mean(subsamp$treatment), ns*2), mtry=mtry, honesty=honestly, min.node.size=min_node_size)
-save(cate_model, file="cate_model.Rdata")
+cate_model = grf::causal_forest(
+  X = train_features,
+  Y = subsamp$conversion,
+  W = subsamp$treatment,
+  W.hat = rep(mean(subsamp$treatment), ns * 2),
+  mtry = mtry,
+  honesty = honestly,
+  min.node.size = min_node_size
+)
+save(cate_model, file = "cate_model.Rdata")
 # load("cate_model.Rdata")
-preds_cate = predict(cate_model, newdata=test_features)$predictions
+preds_cate = predict(cate_model, newdata = test_features)$predictions
 
 y_eval = test_subsamp$visit
-eval_model_visit = grf::causal_forest(X=test_features, Y=y_eval, W=test_subsamp$treatment, W.hat=rep(mean(test_subsamp$treatment), ns*2), min.node.size=min_node_size)
+eval_model_visit = grf::causal_forest(
+  X = test_features,
+  Y = y_eval,
+  W = test_subsamp$treatment,
+  W.hat = rep(mean(test_subsamp$treatment), ns * 2),
+  min.node.size = min_node_size
+)
 
 y_eval = test_subsamp$conversion
-eval_model_conversion = grf::causal_forest(X=test_features, Y=y_eval, W=test_subsamp$treatment, W.hat=rep(mean(test_subsamp$treatment), ns*2), min.node.size=min_node_size)
+eval_model_conversion = grf::causal_forest(
+  X = test_features,
+  Y = y_eval,
+  W = test_subsamp$treatment,
+  W.hat = rep(mean(test_subsamp$treatment), ns * 2),
+  min.node.size = min_node_size
+)
 
 q = seq(0.001, 1, by = 0.003)
-autoc_visit = grf::rank_average_treatment_effect(eval_model_visit, cbind(preds_cate, preds), q=q)
-qini_visit = grf::rank_average_treatment_effect(eval_model_visit, cbind(preds_cate, preds), target="QINI", q=q)
+autoc_visit = grf::rank_average_treatment_effect(
+  forest = eval_model_visit, 
+  priorities = cbind(preds_cate, preds), 
+  q = q
+)
+qini_visit = grf::rank_average_treatment_effect(
+  forest = eval_model_visit,
+  priorities = cbind(preds_cate, preds),
+  target = "QINI",
+  q = q
+)
+autoc_conversion = grf::rank_average_treatment_effect(
+  forest = eval_model_conversion, 
+  priorities = cbind(preds_cate, preds), 
+  q = q
+)
+qini_conversion = grf::rank_average_treatment_effect(
+  forest = eval_model_conversion,
+  priorities = cbind(preds_cate, preds),
+  target = "QINI",
+  q = q
+)
 
-autoc_conversion = grf::rank_average_treatment_effect(eval_model_conversion, cbind(preds_cate, preds), q=q)
-qini_conversion = grf::rank_average_treatment_effect(eval_model_conversion, cbind(preds_cate, preds), target="QINI", q=q)
-
-save(autoc_visit, autoc_conversion, qini_conversion, qini_visit, file="rates_and_tocs.Rdata")
+save(
+  autoc_visit,
+  autoc_conversion,
+  qini_conversion,
+  qini_visit,
+  file = "rates_and_tocs.Rdata"
+)
 # load("rates_and_tocs.Rdata")
 
 print("ATE (visit)")
