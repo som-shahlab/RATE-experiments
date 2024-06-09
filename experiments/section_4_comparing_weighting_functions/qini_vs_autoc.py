@@ -100,7 +100,7 @@ def aipw_func(
             AIPW scores for each individual
     """
     n = X.shape[0]
-    e_hat = np.repeat(e, n)  # TODO: We do not yet support estimation of \hat{e}
+    e_hat = np.repeat(e, n)
 
     # Shape handling to make sure everything works with eg sklearn, econml
     if len(W.shape) == 1:
@@ -337,6 +337,24 @@ def plot_score_comparisons(
     save_dir: str,
     fname: str,
 ) -> None:
+    """
+    Generates and saves a plot comparing the distribution of the
+    estimated Rank-weighted Average Treatment Effect (RATE)
+    for different scoring types (e.g., IPW, AIPW, and Oracle scores).
+
+    Args:
+        qini_estimate_vecs (List[np.ndarray]): List of arrays containing QINI
+            coefficient estimates for different scoring types.
+        autoc_estimate_vecs (List[np.ndarray]): List of arrays containing AUTOC
+            estimates for different scoring types.
+        score_names (List[str]): List of names for the different scoring types.
+        save_dir (str): Directory to save the resulting plot.
+        fname (str): Filename for the saved plot.
+
+    Returns:
+        Nothing, but saves an image in "save_dir/fname"
+    """
+    score_color_map = {"IPW": "tab:blue", "AIPW": "tab:orange", "Oracle": "tab:green"}
     # Initialize plot settings to produce LaTeX-style text
     mpl.rcParams["axes.formatter.use_mathtext"] = True
     mpl.rcParams["font.family"] = "serif"
@@ -360,6 +378,7 @@ def plot_score_comparisons(
             label=score_name,
             kde=True,
             stat="density",
+            color=score_color_map[score_name],
             edgecolor="none",
             bins=50,
         )
@@ -371,6 +390,7 @@ def plot_score_comparisons(
             label=score_name,
             kde=True,
             stat="density",
+            color=score_color_map[score_name],
             edgecolor="none",
             bins=50,
         )
@@ -491,6 +511,7 @@ def plot_qini_vs_autoc(
             stat="density",
             label="Qini Coefficient (Linear)",
             ax=ax_hist,
+            color="tab:blue",
             edgecolor="none",
             bins=hist_bins,
         )
@@ -500,6 +521,7 @@ def plot_qini_vs_autoc(
             stat="density",
             label="AUTOC (Logarithmic)",
             ax=ax_hist,
+            color="tab:orange",
             edgecolor="none",
             bins=hist_bins,
         )
@@ -558,7 +580,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--n_sims",
         type=int,
-        default=10000,
+        default=10000,  # TODO: Reset to 10k
         help="Number of simulations to run "
         "(each simulation results in one RATE estimate).",
     )
@@ -577,7 +599,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--out_dir",
         type=str,
-        default="figures/img/weighting_comps_with_scrambled_scores",
+        default="figures/",
         help="Directory in which generated images should be saved",
     )
     parser.add_argument(
@@ -587,16 +609,27 @@ if __name__ == "__main__":
         help='List where each element "l" represents an experiment '
         'in which "l" out of 1000 subjects have CATE = 0, on avg',
     )
+    parser.add_argument(
+        "--weighting_functions",
+        nargs="+",
+        choices=["QINI", "AUTOC"],
+        default=["QINI", "AUTOC"],
+        help="List of weighting functions to use. Acceptable values are 'QINI' and 'AUTOC'.",
+    )
+    parser.add_argument(
+        "--scoring_types",
+        nargs="+",
+        choices=["IPW", "AIPW", "Oracle"],
+        default=["IPW", "AIPW", "Oracle"],
+        help="List of scoring types to use. Acceptable values are 'IPW', 'AIPW', and 'Oracle'.",
+    )
     args = parser.parse_args()
-
-    weighting_functions = ["QINI", "AUTOC"]
-    scoring_types = ["IPW", "AIPW", "Oracle"]
 
     # Initialize the results dictionary
     RATE_estimates = {}
     for frac in args.frac_zero_cate:
-        for weight_fn in weighting_functions:
-            for scoring_type in scoring_types:
+        for weight_fn in args.weighting_functions:
+            for scoring_type in args.scoring_types:
                 RATE_estimates[(frac, weight_fn, scoring_type)] = []
 
     # Simulations take about 75 minutes on a MacBook Pro w/
@@ -610,11 +643,11 @@ if __name__ == "__main__":
                 frac_zero_cate=frac,
                 seed=b,
             )
-            for scoring_type in scoring_types:
+            for scoring_type in args.scoring_types:
                 scores = get_scores(
                     X, Y, W, e=args.p_treat, m=m_fn, scoring_type=scoring_type
                 )
-                for weight_fn in weighting_functions:
+                for weight_fn in args.weighting_functions:
                     RATE_estimates[(frac, weight_fn, scoring_type)] += [
                         scaled_RATE(scores[np.argsort(X)], method=weight_fn)
                     ]
@@ -630,11 +663,11 @@ if __name__ == "__main__":
                 RATE_estimates[(frac, "QINI", scoring_type)],
                 RATE_estimates[(frac, "AUTOC", scoring_type)],
             )
-            for scoring_type in scoring_types
+            for scoring_type in args.scoring_types
         ]
 
         # Filename for the combined plot
-        fname = f"combined_{int(frac * 100)}_pct_have_nonzero_cate.png"
+        fname = f"qini_vs_autoc_when_{int(frac * 100)}_pct_have_nonzero_cate.png"
 
         # Call the modified plot function with the combined flag set to True
         plot_qini_vs_autoc(
@@ -645,29 +678,18 @@ if __name__ == "__main__":
             Y1=Y1,
             save_dir=args.out_dir,
             fname=fname,
-            scoring_types=scoring_types,
+            scoring_types=args.scoring_types,
             combine_plots=True,  # Set to True to combine all plots into a single figure
         )
-        # plot_qini_vs_autoc(
-        #     qini_estimates=RATE_estimates[(frac, "QINI", scoring_type)],
-        #     autoc_estimates=RATE_estimates[(frac, "AUTOC", scoring_type)],
-        #     X=X,
-        #     tau=tau,
-        #     Y0=Y0,
-        #     Y1=Y1,
-        #     save_dir=args.out_dir,
-        #     fname=fname,
-        #     scoring_type=scoring_type,
-        # )
 
         plot_score_comparisons(
             qini_estimate_vecs=[
-                RATE_estimates[(frac, "QINI", score)] for score in scoring_types
+                RATE_estimates[(frac, "QINI", score)] for score in args.scoring_types
             ],
             autoc_estimate_vecs=[
-                RATE_estimates[(frac, "AUTOC", score)] for score in scoring_types
+                RATE_estimates[(frac, "AUTOC", score)] for score in args.scoring_types
             ],
-            score_names=scoring_types,
+            score_names=args.scoring_types,
             save_dir=args.out_dir,
             fname=f"score_comparisons_for_{int(frac * 100)}_pct_nonzero.png",
         )
