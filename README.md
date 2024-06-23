@@ -2,6 +2,27 @@
 
 This repository contains the code that was used to generate figures and tables for the paper, "[Evaluating Treatment Prioritization Rules via Rank-Weighted Average Treatment Effects](https://arxiv.org/abs/2111.07966)" by Steve Yadlowsky, Scott Fleming, Nigam Shah, Emma Brunskill, and Stefan Wager (2021).
 
+## Table of Contents
+- [Summary](#summary)
+- [Core Rank-weighted Average Treatment Effect (`RATE`) implementation](#core-rank-weighted-average-treatment-effect-rate-implementation)
+- [Applications using the `RATE`](#applications-using-the-rate)
+- [Computational Environment and Packages](#computational-environment-and-packages)
+- [Reproducibility](#reproducibility)
+- [Repository Files and Structure](#repository-files-and-structure)
+  - [`experiments/`](#experiments)
+    - [`experiments/section_4_comparing_weighting_functions`](#experimentssection_4_comparing_weighting_functions)
+    - [`experiments/section_5_international_stroke_trial`](#experimentssection_5_international_stroke_trial)
+    - [`experiments/section_6_SPRINT_and_ACCORD`](#experimentssection_6_sprint_and_accord)
+    - [`experiments/section_7_digital_marketing/`](#experimentssection_7_digital_marketing)
+  - [Additional Repository Files](#additional-repository-files)
+- [Data](#data)
+  - [Section 4: Comparing RATE vs. Qini Coefficient using Synthetic Data](#section-4-comparing-rate-vs-qini-coefficient-using-synthetic-data)
+  - [Section 5: The International Stroke Trial (Clinical, no censoring)](#section-5-the-international-stroke-trial-clinical-no-censoring)
+  - [Section 6: The SPRINT and ACCORD-BP Trials (Clinical, right-censoring)](#section-6-the-sprint-and-accord-bp-trials-clinical-right-censoring)
+  - [Section 7: The Criteo Uplift Dataset (Marketing)](#section-7-the-criteo-uplift-dataset-marketing)
+- [Notes](#notes)
+
+
 ## Summary
 
 Our [paper](https://arxiv.org/abs/2111.07966) proposes an approach for estimating Rank-weighted Average Treatment Effect (RATE) metrics on data. The empirical properties of this estimator are explored in simulations in Section 4 of the paper and its utility is highlighted in three applications in Sections 5, 6, and 7 of the paper. We provide an [implementation](https://grf-labs.github.io/grf/articles/rate.html) of the core RATE estimation machinery via an R package on CRAN ([grf](https://github.com/grf-labs/grf)) and provide a separate repository (this one) with R scripts that can be used to reproduce the results highlighted in the main manuscript.
