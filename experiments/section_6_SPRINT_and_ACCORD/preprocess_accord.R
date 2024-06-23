@@ -46,24 +46,25 @@ df <- accord.key %>%
 
 # Collect all the variables that are easy to derive/compute
 df <- df %>% mutate(
+  # `treatment` from accord_key.sas7bdat
   intensive = treatment %in% c(  # treatment = Treatment Assignment: description
     "Standard Gylcemia/Intensive BP",  # Arm 1
     "Intensive Gylcemia/Intensive BP"  # Arm 3
   ) * 1,
-  age = baseline_age,
-  female = female,
-  black = (raceclass == "Black") * 1,
-  hispanic = (raceclass == "Hispanic") * 1,
-  SBP = sbp,
-  DBP = dbp,
-  aspirin = aspirin,
-  statin = statin,
-  creatinine = screat,
-  cholesterol = chol,
-  HDL_cholesterol = hdl,
-  triglycerides = trig,
-  BMI = wt_kg / ((ht_cm / 100)^2),
-  eGFR = gfr,
+  age = baseline_age,  # Subject's age in years at randomization (from accord_key.sas7bdat)
+  female = female,  # Binary indicator for subject's gender (from accord_key.sas7bdat)
+  black = (raceclass == "Black") * 1,  # Binary indicator for if subject has race "Black" (from accord_key.sas7bdat)
+  hispanic = (raceclass == "Hispanic") * 1,  # Binary indicator if subject has race "Hispanic" (from accord_key.sas7bdat)
+  SBP = sbp,  # Systolic blood pressure in mmHg (from bloodpressure.sas7bdat)
+  DBP = dbp,  # Diastolic blood pressure in mmHg (from bloodpressure.sas7bdat)
+  aspirin = aspirin,  # Subject taking concomitant aspirin at randomization (from concomitantmeds.sas7bdat)
+  statin = statin,  # Subject taking HMG CoA reducatce inhibitors (statins) at randomization (from concomitantmeds.sas7bdat)
+  creatinine = screat,  # Subject's creatinine levels
+  cholesterol = chol,  # Subject's total cholesterol levels
+  HDL_cholesterol = hdl,  # Subject's HDL cholesterol levels
+  triglycerides = trig,  # Subject's triglyceride levels
+  BMI = wt_kg / ((ht_cm / 100)^2),  # Subject's Body Mass Index
+  eGFR = gfr,  # Subject's estimated glomerular filtration rate (eGFR)
   angina = (x2angina == 1) * 1,  # angina or ischemic changes on Graded Exercise Tolerance Test or positive imaging
   revascularization = (
     (cabg == 1) |  # CABG
